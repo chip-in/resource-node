@@ -1,0 +1,6 @@
+{
+  "source" : "./src",
+  "excludes" : ["\\.config\\.js$", "ws-request\\.js", "ws-response\\.js", "logger\\.js" ],
+  "destination" : "./api",
+  "plugins": [{"name": "esdoc-standard-plugin"}]
+}
