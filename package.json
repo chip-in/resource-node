@@ -1,5 +1,5 @@
 {
-  "name": "resource-node",
+  "name": "@chip-in/resource-node",
   "version": "0.0.1",
   "description": "chip-in ResourceNode",
   "keywords": [
@@ -15,7 +15,8 @@
     "cleanbuild": "npm run clean && npm run build",
     "build": "babel src -s inline -d lib/",
     "clean": "del-cli lib",
-    "watch": "npm run clean && babel src -s inline -d lib/ -w"
+    "watch": "npm run clean && babel src -s inline -d lib/ -w",
+    "prepare" : "npm run cleanbuild"
   },
   "devDependencies": {
     "esdoc": "^1.0.1",
@@ -31,5 +32,8 @@
     "node-fetch": "^1.7.3",
     "socket.io-client": "^2.0.3",
     "uuid": "^3.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

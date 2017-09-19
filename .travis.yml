@@ -1,0 +1,14 @@
+language: node_js
+node_js:
+- '8'
+cache:
+  directories:
+  - node_modules
+deploy:
+  provider: npm
+  email: takuwa@procube.jp
+  api_key:
+    secure: fxCFRWHwPrFrDBW7LDJEE83xljdiWVrq+KMRBSh74mOM/uPazcORBKEgcEvC0luJnLrcNcMj3CX7HcHzUrV2B6TKOU9ZCtTyVPQP0dpOdYj37ZU1XS0YY0DCIQCbiGtl0/xz7ekCi4B6QAE87cKF+j3bY6pjwAl+yMs7BVrM0XFRMC2VgY2depXoLoK3Od91VWYR6ovE9xWsVd4C66B7acVew4mcH0e7kWTknqSysm1Gl581eT7597Ymxhm5bM4fNlREuHgTAzlgyicygDMvRrDbUgridrZOHbS3XAiKay1xgk/C1iFpVCprpdq9S/XbaYYKVyxgFFTr5YH9VubHUENKdBfH0xGWyHZORTrfH3RDCj5c4IXRyFSIv4YKCdgFVboOUr3Ov53cbv21MvoK4B/Ldw88UhXDateJgcn6bWg8eyQIvCHY1OM+j53cqlqzTQ6jZuF+NINf+XhTtT05L4MXYyAEPZGHNC7S3xsTz98RywSk69G8lfaUaMS0fmjRhYpf/omQQhfbvudWftkRHJrU6m3zsmwfvwgZ7+EfUKP9jA+0W5xlEuuinSOY4vEIiVHv1eATa7rK0ZppzbmOrjCV6fOozf5JAAyEd/oEYwgAcQp9oWlEmXj6YC4GWqBSvhfIIH86zrj7C0x/g/gq6Bo5LnK3k0zE/t1abCkeBJ8=
+  on:
+    tags: true
+    repo: chip-in/resource-node
