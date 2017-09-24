@@ -288,7 +288,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
     var port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
     var mqttPath = process.env.CNODE_MQTT_PATH || "/m";
 
-    return [mqttProto,"://",coreHost,port,mqttPath].concat("");
+    return [mqttProto,"://",coreHost,port,mqttPath].join("");
   }
   /**
    * @desc 指定したトピックの購読を終了する
@@ -476,7 +476,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
     }
     var href = path;
     if ( path.indexOf("/") === 0) {
-      href = new url.URL(path, this.coreNodeURL).href;
+      href = url.resolve(this.coreNodeURL, path);
     } else if (path.indexOf("http://") !== 0 &&
                 path.indexOf("https://") !== 0) {
         return Promise.reject("Invalid url is specified:%s", path);
