@@ -7,6 +7,7 @@ import WSResponse from './conversion/ws-response';
 import WSRequest from './conversion/ws-request';
 import mqtt from 'mqtt';
 import fetch from 'node-fetch';
+import {Headers} from 'node-fetch';
 import parser from 'mongo-parse';
 
 /**
@@ -80,6 +81,8 @@ export default class ResourceNode {
     this.webSocketMsgName = process.env.CNODE_WSOCKET_MSG_NAME || 'ci-msg';    
 
     this.mqttConnections = {};
+
+    this.mqttClientConnections = {};
 
     this.sessionTable = {};
   }
@@ -256,29 +259,40 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    * @see https://www.ibm.com/developerworks/jp/websphere/library/wmq/mqtt31_spec/
    *
    */
-  subscribe(topicName, subscriber) { 
+  subscribe(topicName, subscriber) {
     if (this.mqttConnections[topicName]) {
       this.logger.info("Topic allready subscribed:%s", topicName);
       return Promise.resolve();
     }
-    return Promise.resolve()
-      .then(()=>{
-        var mqttUrl = this._createMQTTUrl();
-        var client = mqtt.connect(mqttUrl, {
-          keepalive : 30,
-          username : this.userId,
-          password : this.password
+    return new Promise((resolve, reject) => {
+      var responded = false;
+      var mqttUrl = this._createMQTTUrl();
+      var client = mqtt.connect(mqttUrl, {
+        keepalive: 30,
+        username: this.userId,
+        password: this.password
+      });
+      client.on("connect", (connack) => {
+        client.subscribe(topicName, {}, (e, g) => {
+          this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          if (!responded) {
+            responded = true;
+            resolve();
+          }
+        })
+        client.on("message", (topic, message, packet) => {
+          subscriber.onReceive(message);
         });
-        client.on("connect", ()=>{
-          client.subscribe(topicName, {}, (e, g)=>{
-            this.logger.info("subcribe topic(%s):%s:%s", e , g)
-          })
-          client.on("message", (topic, message, packet)=>{
-            subscriber.onReceive(menubar);
-          });
-        }); 
-        this.mqttConnections[topicName] = client;
-      })
+        client.on("error", (e)=>{
+          this.logger.info("Failed to subscribe", e);
+          if (!responded) {
+            responded = true;
+            reject(e)
+          }
+        })
+      });
+      this.mqttConnections[topicName] = client;
+    })
   }
 
   _createMQTTUrl() {
@@ -302,15 +316,24 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
       this.logger.info("Topic nout found:%s", topicName);
       return Promise.resolve();
     }
-    return Promise.resolve()
-      .then(()=>{
-        var connection = this.mqttConnections[topicName];
-        if (!connection ) {
-          return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      var connection = this.mqttConnections[topicName];
+      if (!connection) {
+        resolve();
+        return;
+      }
+      connection.unsubscribe(topicName, (e)=>{
+        connection.end();
+        delete this.mqttConnections[topicName];
+        if (e) {
+          this.logger.warn("Failed to unsubscribe topic:%s", topicName, e);
+          reject(e);
+          return;
         }
-        connection.end()
-        return Promise.resolve();
+        this.logger.info("Succeeded to unsubscribe topic(%s)", topicName);
+        resolve();
       })
+    });
   }
 
   /**
@@ -322,6 +345,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    *
    */
   publish(topicName, message) {
+    var key = uuidv4();
     return Promise.resolve()
     .then(()=>{
       return new Promise((resolve, reject)=>{
@@ -334,16 +358,22 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
         client.on("connect", ()=>{
           client.publish(topicName, message, (e)=>{
             client.end();
+            delete this.mqttClientConnections[key];
             if (e) {
-              this.logger.error("Failed to publish", e);
+              this.logger.error("Failed to publish(%s)", topicName, e);
               reject(e);
               return;
             }
-            this.logger.info("Succeeded to publish")
+            this.logger.info("Succeeded to publish(%s)", topicName)
             resolve();
           })
         }); 
-        this.mqttConnections[topicName] = client;
+        client.on("error", (e) => {
+          delete this.mqttClientConnections[key];
+          this.logger.info("Failed to publish", e);
+          reject(e);
+        })
+        this.mqttClientConnections[key] = client;
       });
     })
   }
@@ -481,8 +511,21 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
                 path.indexOf("https://") !== 0) {
         return Promise.reject("Invalid url is specified:%s", path);
     }
+    option = option || {};
+    this._setAuthorizationHeader(option, this.userId, this.password);
     return fetch(href, option);
    
+  }
+
+  _setAuthorizationHeader(option, userId, userPassword) {
+    if (option == null || this.userId == null || userPassword == null) {
+      return;
+    }
+    var headers = option.headers;
+    if (!headers) {
+      headers = option.headers = new Headers();
+    }
+    headers.append('Authorization', 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64"))
   }
 
   _normalizeHeader(obj) {
@@ -641,6 +684,25 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
       }, Promise.resolve()))
       .then(()=>{
         this.serviceInstances = [];
+      })
+      .then(()=>{
+        for (var topicName in this.mqttConnections) {
+          var conn = this.mqttConnections[topicName];
+          conn.unsubscribe(topicName, (e)=>{
+            if (e) {
+              this.logger.warn("Failed to unsubscribe topic", e);
+            } else {
+              this.logger.info("Unsubscribe topic(%s) on shutdown", topicName);
+            }
+            conn.end();
+          });
+        }
+        this.mqttConnections = {};
+      })
+      .then(()=>{
+        for (var k in this.mqttClientConnections) {
+          this.mqttClientConnections[k].end();
+        }
       })
   }
   

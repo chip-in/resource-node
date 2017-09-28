@@ -5,7 +5,9 @@ export default class WSRequest {
     var names = ["baseUrl","body","cookies","fresh","hostname","ip","method",
       "originalUrl","params","path","protocol","query","secure",
     "signedCookies","headers","httpVersion","rawHeaders","url"];
-    names.map((n)=>this[n] = msg[n]);
+    names.map((n)=>{
+      if(msg && msg.m && msg.m.req) this[n] = msg.m.req[n]
+    });
     this.aborted = false;
     this.em = new EventEmitter();
     this.em.on("close", ()=>{
