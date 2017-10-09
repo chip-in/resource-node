@@ -16,7 +16,7 @@
     "build": "babel src -s inline -d lib/",
     "clean": "del-cli lib",
     "watch": "npm run clean && babel src -s inline -d lib/ -w",
-    "prepare" : "npm run cleanbuild"
+    "prepare": "npm run cleanbuild"
   },
   "devDependencies": {
     "esdoc": "^1.0.1",
@@ -27,6 +27,7 @@
     "del-cli": "^1.1.0"
   },
   "dependencies": {
+    "cookie-parser": "^1.4.3",
     "mongo-parse": "^2.0.3",
     "mqtt": "^2.13.0",
     "node-fetch": "^1.7.3",

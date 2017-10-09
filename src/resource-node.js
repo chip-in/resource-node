@@ -9,6 +9,10 @@ import mqtt from 'mqtt';
 import fetch from 'node-fetch';
 import {Headers} from 'node-fetch';
 import parser from 'mongo-parse';
+import DirectoryService from './util/directory-service';
+import querystring from 'querystring';
+import LocalRequest from './conversion/local-request';
+import LocalResponse from './conversion/local-response';
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -85,6 +89,10 @@ export default class ResourceNode {
     this.mqttClientConnections = {};
 
     this.sessionTable = {};
+
+    this.proxyDirService = new DirectoryService();
+
+    this.localProxyMap = {};
   }
 
   /**
@@ -513,8 +521,30 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
     }
     option = option || {};
     this._setAuthorizationHeader(option, this.userId, this.password);
+
+    var urlObj = url.parse(href);
+    var localService = null;
+    if (this._isCoreNodeRequest(urlObj)  &&
+      (localService = this.proxyDirService.lookup(urlObj.path)) != null) {
+        return this._localFetch(path, option, localService);
+    }
     return fetch(href, option);
    
+  }
+
+  _isCoreNodeRequest(urlObj) {
+    var corenodeUrlObj = url.parse(this.coreNodeURL);
+    var defaultPort = corenodeUrlObj.protocol.indexOf("https:") === 0 ? "443" : "80";
+    return (urlObj.protocol === corenodeUrlObj.protocol &&
+      urlObj.hostname.toLocaleLowerCase() === corenodeUrlObj.hostname.toLowerCase() &&
+      (urlObj.port || defaultPort) === (corenodeUrlObj.port || defaultPort));
+  }
+  _localFetch(requestHref, option, localService) {
+    return new Promise((res, rej)=>{
+      var req = new LocalRequest(requestHref, option);
+      var res = new LocalResponse(res, rej, req);
+      localService.proxy.onReceive(req, res)
+    })
   }
 
   _setAuthorizationHeader(option, userId, userPassword) {
@@ -707,7 +737,9 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
   }
   
   _mount(path, mode, proxy) {
-    
+    if (mode === "localOnly") {
+      return this._localMount(path, mode, proxy);
+    }
     var key = uuidv4();
     return Promise.resolve()
       .then(()=>this._ask({
@@ -738,8 +770,26 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
         return mountId;
     });
   }
+  _localMount(path, mode, proxy) {
+    var handle = uuidv4();
+    return Promise.resolve()
+      .then(()=>{
+        var dst  = this.proxyDirService.lookup(path);
+        if (dst != null) {
+          this.logger.info("remount " + path);
+        }
+        this.proxyDirService.bind(path, {
+          handle, proxy
+        });
+        this.localProxyMap[handle] = path;
+        return handle;
+      })
+  }
 
   _unmount(handle) {
+    if (this.localProxyMap[handle] != null) {
+        return this._localUnmount(handle);
+    }
     var key = uuidv4();
     return Promise.resolve()
       .then(()=>this._ask({
@@ -762,6 +812,19 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
         this.logger.info("Succeeded to unmount:%s", handle);
         delete this.proxies[handle];
     });
+  }
+  
+  _localUnmount(handle) {
+    return Promise.resolve()
+      .then(()=>{
+        var path = this.localProxyMap[handle];
+        if (path == null) {
+          this.logger.info("path not found (to unmount locally)")
+          return ;
+        }
+        this.proxyDirService.unbind(path);
+        delete this.localProxyMap[handle];
+      });
   }
 
   _ask(msg) {

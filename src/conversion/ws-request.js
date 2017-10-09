@@ -1,7 +1,7 @@
 import EventEmitter from 'events'
 
 export default class WSRequest {
-  constructor(msg, res, rej) {
+  constructor(msg) {
     var names = ["baseUrl","body","cookies","fresh","hostname","ip","method",
       "originalUrl","params","path","protocol","query","secure",
     "signedCookies","headers","httpVersion","rawHeaders","url"];
