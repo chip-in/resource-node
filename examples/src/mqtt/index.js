@@ -25,26 +25,36 @@ rnode.registerServiceClasses({
 rnode.start()
   .then(() => {
     rnode.logger.info("Succeeded to start resource-node");
-    /* ##### fetch ##### */
+    var topicName = "test_subscriber";
+    var subscriberId = null;
     return Promise.resolve()
       .then(() => {
-        var topicName = "test_subscriber";
         return rnode.subscribe(topicName, new SubscriberImpl())
-          .then(() => rnode.publish(topicName, JSON.stringify({
-            "message": "this message will be delivered"
-          }))
-          )
+          .then((key) => {
+            subscriberId = key;
+            return rnode.publish(topicName, JSON.stringify({
+              "message": "this message will be delivered"
+            }))
+          })
       })
       .then(() => new Promise((resolve, reject) => {
         setTimeout(resolve, 1000);
       }))
       .then(() => {
-        var topicName = "test_subscriber";
-        return rnode.unsubscribe(topicName)
+        return rnode.unsubscribe(subscriberId)
           .then(() => rnode.publish(topicName, JSON.stringify({
             "message": "this message will not be delivered"
           }))
           )
+      })
+      .then(() => {
+        var topicName = "test_multiple_subscriber";
+        var subscribers = [new SubscriberImpl(), new SubscriberImpl()];
+        return Promise.resolve()
+          .then(()=>Promise.all(subscribers.map((s)=>rnode.subscribe(topicName, s))))
+          .then(() => rnode.publish(topicName, JSON.stringify({
+            "message": "this message will be delivered for 2 subscribers"
+          })))
       })
       .then(() => rnode.stop())
 

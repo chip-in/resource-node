@@ -32,7 +32,6 @@ rnode.start()
   .then(()=>{
     rnode.logger.info("Succeeded to start resource-node");
 
-    /* ##### fetch ##### */
     return Promise.resolve()
       .then(()=>{
         var names = [];

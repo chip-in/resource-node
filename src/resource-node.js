@@ -263,15 +263,12 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    * @desc 指定したトピックを購読する
    * @param {string} topicName トピック名
    * @param {Subscriber} subscriber Subscriberオブジェクト
-   * @return {Promise} 購読処理完了時に状態遷移するPromiseオブジェクト
+   * @return {Promise<string>} 購読処理完了時、unsubscribeするためのキー文字列を返すPromiseオブジェクト. 
    * @see https://www.ibm.com/developerworks/jp/websphere/library/wmq/mqtt31_spec/
    *
    */
   subscribe(topicName, subscriber) {
-    if (this.mqttConnections[topicName]) {
-      this.logger.info("Topic allready subscribed:%s", topicName);
-      return Promise.resolve();
-    }
+    var key = uuidv4();
     return new Promise((resolve, reject) => {
       var responded = false;
       var mqttUrl = this._createMQTTUrl();
@@ -285,7 +282,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
           this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
           if (!responded) {
             responded = true;
-            resolve();
+            resolve(key);
           }
         })
         client.on("message", (topic, message, packet) => {
@@ -299,7 +296,10 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
           }
         })
       });
-      this.mqttConnections[topicName] = client;
+      this.mqttConnections[key] = {
+        client, topicName
+      };
+      this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
     })
   }
 
@@ -314,31 +314,27 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
   }
   /**
    * @desc 指定したトピックの購読を終了する
-   * @param {string} topicName トピック名
+   * @param {string} key 購読時に取得したキー文字列
    * @return {Promise} 購読終了処理完了時に状態遷移するPromiseオブジェクト
    * @see https://www.ibm.com/developerworks/jp/websphere/library/wmq/mqtt31_spec/
    *
    */
-  unsubscribe(topicName) { 
-    if (!this.mqttConnections[topicName]) {
-      this.logger.info("Topic nout found:%s", topicName);
+  unsubscribe(key) { 
+    var def = this.mqttConnections[key];
+    if (def == null) {
+      this.logger.warn("Key not found:%s", key);
       return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
-      var connection = this.mqttConnections[topicName];
-      if (!connection) {
-        resolve();
-        return;
-      }
-      connection.unsubscribe(topicName, (e)=>{
-        connection.end();
-        delete this.mqttConnections[topicName];
+      def.client.unsubscribe(def.topicName, (e)=>{
+        def.client.end();
+        delete this.mqttConnections[key];
         if (e) {
-          this.logger.warn("Failed to unsubscribe topic:%s", topicName, e);
+          this.logger.warn("Failed to unsubscribe topic:(%s : %s)", def.topicName, key, e);
           reject(e);
           return;
         }
-        this.logger.info("Succeeded to unsubscribe topic(%s)", topicName);
+        this.logger.info("Succeeded to unsubscribe topic(%s : %s)", def.topicName, key);
         resolve();
       })
     });
@@ -716,18 +712,19 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
         this.serviceInstances = [];
       })
       .then(()=>{
-        for (var topicName in this.mqttConnections) {
-          var conn = this.mqttConnections[topicName];
-          conn.unsubscribe(topicName, (e)=>{
-            if (e) {
-              this.logger.warn("Failed to unsubscribe topic", e);
-            } else {
-              this.logger.info("Unsubscribe topic(%s) on shutdown", topicName);
-            }
-            conn.end();
-          });
-        }
-        this.mqttConnections = {};
+        return Promise.all(Object.keys(this.mqttConnections).map((k)=>{
+          var def = this.mqttConnections[k];
+          def.client.unsubscribe(def.topicName, (e)=>{
+          if (e) {
+            this.logger.warn("Failed to unsubscribe topic", e);
+          } else {
+            this.logger.info("Unsubscribe topic on shutdown(%s:%s)", def.topicName, k);
+          }
+          def.client.end();
+        })}))
+        .then(()=>{
+          this.mqttConnections = {};
+        })
       })
       .then(()=>{
         for (var k in this.mqttClientConnections) {
