@@ -3,3 +3,4 @@
 /lib
 /api
 examples/lib
+examples/src/*/node_modules

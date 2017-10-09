@@ -1,6 +1,6 @@
 import buffer from 'buffer';
 
-var Buffer = buffer.Bugger;
+var Buffer = buffer.Buffer;
 export default class WSResponse {
   constructor(msg, res, rej, req) {
     this.msg = msg;
@@ -104,11 +104,20 @@ export default class WSResponse {
     if (encoding) {
       this.encoding = encoding;
     }
+    if (chunk == null) {
+      return;
+    }
     if (typeof chunk === "string") {
-      body += chunk;
+      this.body += chunk;
+    } else if (Buffer.isBuffer(chunk)) {
+      if (this.body != null) {
+        this.body = Buffer.concat(this.body, chunk);
+      } else {
+        this.body = chunk;
+      }
     } else if (chunk != null) {
-      //buffer
-      body += chunk.toString();
+      //???
+      this.body += chunk.toString();
     }
   }
   writeContinue() {

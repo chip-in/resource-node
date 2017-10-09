@@ -17,9 +17,9 @@
     "clean": "del-cli lib",
     "watch": "npm run clean && babel src -s inline -d lib/ -w",
     "example-cleanbuild": "npm run example-clean && npm run example-build",
-    "example-build": "babel examples/src -s inline -d examples/lib/",
+    "example-build": "babel examples/src -s inline -d examples/lib/ --copy-files",
     "example-clean": "del-cli examples/lib",
-    "example-watch": "npm run example-clean && babel examples/src -s inline -d examples/lib/ -w",
+    "example-watch": "npm run example-clean && babel examples/src -s inline -d examples/lib/ --copy-files -w",
     "prepare": "npm run cleanbuild"
   },
   "devDependencies": {
@@ -33,6 +33,7 @@
   "dependencies": {
     "cookie-parser": "^1.4.3",
     "mongo-parse": "^2.0.3",
+    "morgan": "^1.9.0",
     "mqtt": "^2.13.0",
     "node-fetch": "^1.7.3",
     "socket.io-client": "^2.0.3",

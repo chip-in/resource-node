@@ -1,0 +1,22 @@
+<html>
+  <head>
+    <title>Resourcenode static-files example(server)</title>
+    <link rel="stylesheet" href="css/sample.css">
+    <script lang="text/javascript" src="js/sample.js"></script>
+    <script lang="text/javascript">
+      window.onload = function() {
+        document.getElementById("invoker").onclick = function() {
+          showAlert();
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="brand-container"><img src="img/logo.png"/></div>
+    <div class="contents-container">
+      <h1>Hello static files server</h1>
+      <a href="#" id="invoker">アラートを表示する</a>
+    </div>
+    
+  </body>
+</html>
