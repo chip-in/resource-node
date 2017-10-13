@@ -79,6 +79,8 @@ class ResourceNode {
     this.localProxyMap = {};
 
     this.ctx = {};
+
+    this.operationQueue = [];
   }
 
   /**
@@ -103,6 +105,7 @@ node.start()
     }
     return Promise.resolve()
       .then(()=>this._tryToJoinCluster())
+      .then(()=>this._ensureConnected())
       .then(()=>this._enableServices())
       .then(()=>this.started = true)
       .catch((e)=>{
@@ -130,6 +133,7 @@ node.stop()
     if (!force && !this.started) {
       return Promise.resolve();
     }
+    //It doesn't ensure connection
     return Promise.resolve()
       .then(()=>this._disableServices())
       .then(()=>this._leaveCluster())
@@ -213,6 +217,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    */
   fetch(path, option) {
     return Promise.resolve()
+      .then(()=>this._ensureConnected())
       .then(()=> this._fetch(path, option));
   }
 
@@ -273,6 +278,7 @@ rnode.start()
       return Promise.reject(new Error("Unknown mode is specified"));
     }
     return Promise.resolve()
+      .then(()=>this._ensureConnected())
       .then(()=> this._mount(path, mode, proxy));
   }
 
@@ -283,6 +289,7 @@ rnode.start()
    *
    */
   unmount(handle) {
+    //It doesn't ensure connection
     return Promise.resolve()
       .then(()=> this._unmount(handle));
   }
@@ -297,37 +304,41 @@ rnode.start()
    */
   subscribe(topicName, subscriber) {
     var key = uuidv4();
-    return new Promise((resolve, reject) => {
-      var responded = false;
-      var mqttUrl = this._createMQTTUrl();
-      var client = mqtt.connect(mqttUrl, {
-        keepalive: 30,
-        username: this.userId,
-        password: this.password
-      });
-      client.on("connect", (connack) => {
-        client.subscribe(topicName, {}, (e, g) => {
-          this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
-          if (!responded) {
-            responded = true;
-            resolve(key);
-          }
-        })
-        client.on("message", (topic, message, packet) => {
-          subscriber.onReceive(message);
+    return Promise.resolve()
+    .then(()=>this._ensureConnected())
+    .then(()=>{
+      return new Promise((resolve, reject) => {
+        var responded = false;
+        var mqttUrl = this._createMQTTUrl();
+        var client = mqtt.connect(mqttUrl, {
+          keepalive: 30,
+          username: this.userId,
+          password: this.password
         });
-        client.on("error", (e)=>{
-          this.logger.info("Failed to subscribe", e);
-          if (!responded) {
-            responded = true;
-            reject(e)
-          }
-        })
-      });
-      this.mqttConnections[key] = {
-        client, topicName
-      };
-      this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
+        client.on("connect", (connack) => {
+          client.subscribe(topicName, {}, (e, g) => {
+            this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+            if (!responded) {
+              responded = true;
+              resolve(key);
+            }
+          })
+          client.on("message", (topic, message, packet) => {
+            subscriber.onReceive(message);
+          });
+          client.on("error", (e)=>{
+            this.logger.info("Failed to subscribe", e);
+            if (!responded) {
+              responded = true;
+              reject(e)
+            }
+          })
+        });
+        this.mqttConnections[key] = {
+          client, topicName
+        };
+        this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
+      })
     })
   }
 
@@ -353,19 +364,23 @@ rnode.start()
       this.logger.warn("Key not found:%s", key);
       return Promise.resolve();
     }
-    return new Promise((resolve, reject) => {
-      def.client.unsubscribe(def.topicName, (e)=>{
-        def.client.end();
-        delete this.mqttConnections[key];
-        if (e) {
-          this.logger.warn("Failed to unsubscribe topic:(%s : %s)", def.topicName, key, e);
-          reject(e);
-          return;
-        }
-        this.logger.info("Succeeded to unsubscribe topic(%s : %s)", def.topicName, key);
-        resolve();
-      })
-    });
+    //It doesn't ensure connection
+    return Promise.resolve()
+      .then(()=>{
+      return new Promise((resolve, reject) => {
+        def.client.unsubscribe(def.topicName, (e)=>{
+          def.client.end();
+          delete this.mqttConnections[key];
+          if (e) {
+            this.logger.warn("Failed to unsubscribe topic:(%s : %s)", def.topicName, key, e);
+            reject(e);
+            return;
+          }
+          this.logger.info("Succeeded to unsubscribe topic(%s : %s)", def.topicName, key);
+          resolve();
+        })
+      });
+    })
   }
 
   /**
@@ -379,6 +394,7 @@ rnode.start()
   publish(topicName, message) {
     var key = uuidv4();
     return Promise.resolve()
+    .then(()=>this._ensureConnected())
     .then(()=>{
       return new Promise((resolve, reject)=>{
         var mqttUrl = this._createMQTTUrl();
@@ -623,11 +639,16 @@ rnode.start()
         });
         //ResourceNode distinguishes connection-status from resource-node-startup-status.
         socket.on('connect', ()=>{
-          this.isConnected = true;
+          this.logger.warn("connected to core-node via websocket");
           //start clustering
-          this._register();
+          this._register()
+            .then(()=>{
+              this.isConnected = true;
+              this._notifyConnected();
+            })
         });
         socket.on('disconnect', ()=>{
+          this.logger.warn("disconnected to core-node via websocket");
           this.isConnected = false;
         });
         socket.on(this.webSocketMsgName, (msg) =>{
@@ -641,13 +662,13 @@ rnode.start()
     return Promise.resolve()
       .then(()=>{
 
-      var uuid = uuidv4();
+      var uuid = this.nodeId || uuidv4();
       var registerMsg = {
         i: uuid,
         s : "ClusterService",
         t : "register"
       };
-      this._ask(registerMsg)
+      return this._ask(registerMsg)
         .then((resp)=>{
           if (resp.t !== "registerResponse") {
             this.logger.error("Failed to register. Received unexpected response:%s", JSON.stringify(resp));
@@ -658,6 +679,7 @@ rnode.start()
             throw new Error("Failed to register. Received unexpected result code");
           }
           this.logger.info("Succeeded to register cluster");
+          this.nodeId = uuid;
         });
     });
   }
@@ -887,6 +909,45 @@ rnode.start()
   _send(msg) {
     return Promise.resolve()
       .then(()=>this.socket.emit(this.webSocketMsgName, msg));
+  }
+
+  _ensureConnected(timeout) {
+    return new Promise((resolve, reject)=>{
+      if (this.isConnected) {
+        this.logger.debug("ensureConnection: OK")
+        resolve();
+        return;
+      }
+      this.logger.debug("ensureConnection: NG")
+      var operation = {
+        resolve, expired : false
+      };
+      this.operationQueue.push(operation);
+      if (timeout) {
+        var timeoutId = setTimeout(()=>{
+          reject(new Error("Connection timeout"));
+          operation.expired = true;
+        }, timeout);
+        operation.timeoutId = timeoutId;
+      }
+    });
+  }
+  _notifyConnected() {
+    this.logger.debug("Connected. So we notify waiter")
+    var target = this.operationQueue;
+    //clear
+    this.operationQueue = [];
+    return Promise.resolve()
+      .then(()=>{
+        target.map((op)=>{
+          if (!op.expired) {
+            op.resolve();
+            if (op.timeoutId) {
+              clearTimeout(op.timeoutId);
+            }
+          }
+        });
+      })
   }
 }
 
