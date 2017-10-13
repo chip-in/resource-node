@@ -17,7 +17,7 @@ import LocalResponse from './conversion/local-response';
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
  */
-export default class ResourceNode {
+class ResourceNode {
 
 
   /**
@@ -32,16 +32,8 @@ export default class ResourceNode {
      */
     this.logger = new Logger("ResourceNode");
 
-    /**
-     * @desc サービスクラス定義マップ
-     * @type {Object}
-     */
     this.serviceClasses = {};
 
-    /**
-     * @desc サービスエンジンインスタンスの配列
-     * @type {Array<ServiceEngine>}
-     */
     this.serviceInstances = [];
 
     /**
@@ -56,16 +48,8 @@ export default class ResourceNode {
      */
     this.nodeClassName = nodeClassName;
 
-    /**
-     * @desc BASIC認証ユーザID
-     * @type {string}
-     */
     this.userId = null;
 
-    /**
-     * @desc BASIC認証パスワード
-     * @type {string}
-     */
     this.password = null;
 
     /**
@@ -93,11 +77,13 @@ export default class ResourceNode {
     this.proxyDirService = new DirectoryService();
 
     this.localProxyMap = {};
+
+    this.ctx = {};
   }
 
   /**
    * @desc リソースノードを起動する
-   * @return {Promise<>} 起動完了または失敗時に状態遷移するPromiseオブジェクト
+   * @return {Promise} 起動完了または失敗時に状態遷移するPromiseオブジェクト
      @example
 node.start()
   .then(() => {
@@ -127,7 +113,7 @@ node.start()
   }
   /**
    * @desc リソースノードを停止する
-   * @return {Promise<>} 停止完了または失敗時に状態遷移するPromiseオブジェクト
+   * @return {Promise} 停止完了または失敗時に状態遷移するPromiseオブジェクト
      @example
 node.stop()
   .then(() => {
@@ -237,6 +223,48 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    * "loadBalancing"(複数のノードによる負荷分散), "localOnly"(ノード内専用のサービス) のいずれか
    * @param {Proxy} proxy Proxyオブジェクト
    * @return {Promise<string>} 登録後または失敗後に状態遷移するPromiseオブジェクト。成功時には マウントハンドルとして使用する文字列が返る。このハンドルは、unmount時に必要となる。
+   * @example 
+   * 
+class ProxyImpl extends Proxy {
+  constructor(rnode, path) {
+    super();
+    this.rnode = rnode;
+    this.basePath = path;
+  }
+  onReceive(req, res) {
+    return Promise.resolve()
+      .then(()=>{
+        //TODO リクエスト受信後の処理
+        return res;
+      })
+  }
+}
+var rnode = new ResourceNode(coreNodeUrl, "db-server");
+rnode.registerServiceClasses({
+  RestConnector,
+  DatabaseRegistry,
+  ContextManager,
+  UpdateManager,
+  SubsetStorage
+});
+var mountId = null;
+rnode.start()
+  .then(() => {
+    rnode.logger.info("Succeeded to start resource-node");
+    return Promise.resolve()
+      .then(()=>rnode.mount(path, mode, new ProxyImpl(rnode, path)))  // ***** mount ***** 
+      .then((mountId) => {
+        rnode.logger.info("Succeeded to mount. Try to access '" + coreNodeUrl + path + "'");
+      })
+      .catch((e)=>{
+        rnode.logger.info("Failed to mount", e);
+        rnode.stop();
+      })
+  }).catch((e) => {
+    rnode.logger.info("Failed to start resource-node", e);
+    rnode.stop();
+  })
+
    *
    */
   mount(path, mode, proxy) {
@@ -251,7 +279,7 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
   /**
    * @desc 指定したパスの逆接続プロキシ登録を解除する
    * @param {string} handle マウントハンドル
-   * @return {Promise<>} 登録解除後または失敗後に状態遷移するPromiseオブジェクト。
+   * @return {Promise} 登録解除後または失敗後に状態遷移するPromiseオブジェクト。
    *
    */
   unmount(handle) {
@@ -393,6 +421,25 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
     this.password = password;
   }
 
+  /**
+   * @desc ユーザや動作環境を保持するコンテキストオブジェクトを取得する.
+   * コンテキストオブジェクトには「アイデンティティ（ユーザの属性で、SAMLの属性）」「デバイス」「位置情報（ブラウザのみ）	」「環境変数（node.jsのみ）」「個別設定（ブラウザのみ、ユーザが個別に設定する設定値）」が含まれる. 取得可能なプロパティ一覧については、別紙（要作成）を参照のこと.
+   * 
+   * @return {object} コンテキストオブジェクト
+   */
+  getContext() {
+    return Object.assign({}, this.ctx);
+  }
+
+  /**
+   * @desc 「個別設定（ブラウザのみ、ユーザが個別に設定する設定値）」のプロパティを設定する. 設定された内容はLocalStorageに保存される
+   * @param {string} name 個別設定のプロパティ名
+   * @param {*} value プロパティ値
+   * @return {Promise} 処理完了後に応答するPromiseオブジェクト
+   */
+  setCustomParameter(name, value) {
+
+  }
 
   _searchServiceEngine(serviceClassName, query) {
     var ret = [];
@@ -843,3 +890,4 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
   }
 }
 
+export default ResourceNode

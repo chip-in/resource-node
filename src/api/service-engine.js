@@ -3,23 +3,19 @@ import Logger from '../util/logger';
 /**
  * @desc サービスエンジン実装のインタフェース
  */
-export default class ServiceEngine {
+class ServiceEngine {
   /**
    * @desc コンストラクタ
-   * @param [{option}] option コアノードに登録された構成情報
+   * @param {object} [option] コアノードに登録された構成情報
    */
   constructor(option) {
-    /**
-     * @desc ロガー
-     * @type {Logger}
-     */
     this.logger = new Logger("ServiceEngine");
   }
 
   /**
    * @desc サービスエンジンを起動する
    * @param {ResourceNode} node リソースノード
-   * @return {Promise<>} 起動完了後に状態遷移するPromiseオブジェクト
+   * @return {Promise} 起動完了後に状態遷移するPromiseオブジェクト
    * @abstract
      @example
 //実装例
@@ -42,7 +38,7 @@ export default class WebUiEngine extends ServiceEngine {
   /**
    * @desc サービスエンジンを終了する
    * @param {ResourceNode} node リソースノード
-   * @return {Promise<>} 終了後に状態遷移するPromiseオブジェクト
+   * @return {Promise} 終了後に状態遷移するPromiseオブジェクト
    * @abstract
      @example
 //実装例
@@ -64,3 +60,4 @@ export default class WebUiEngine extends ServiceEngine {
   }
 
 }
+export default ServiceEngine

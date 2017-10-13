@@ -3,12 +3,8 @@ import Logger from '../util/logger';
 /**
  * @desc 逆接続プロキシのリクエスト受信後のコールバック処理クラスのインタフェース
 */
-export default class Proxy {
+class Proxy {
   constructor() {
-    /**
-     * @desc ロガー
-     * @type {Logger}
-     */
     this.logger = new Logger("Proxy");
   }
   /**
@@ -23,7 +19,7 @@ export default class Proxy {
 class WebUi extends Proxy {
 	onReceive (req, res) {
 		return new Promise((resolve, reject)=>{
-			//（注）リクエスト内容をレスポンスを生成する処理
+			//（注）リクエストに応じた処理を行い、レスポンスを生成する処理を記述する。
 			resolve(res);
 		});
 	}
@@ -35,3 +31,4 @@ class WebUi extends Proxy {
     return Promise.resolve(res);
   }
 }
+export default Proxy

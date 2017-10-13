@@ -9,13 +9,16 @@ var logging = function() {
   console.log(msgs.join(" "));
 }
 
-export default class Logger {
+/**
+ * @desc  ロガークラス
+ */
+class Logger {
   constructor(category) {
     this.category = category || "";
   }
   
   /**
-   * @desc デバッグレベルログ出力
+   * @desc デバッグレベルログを出力する
    * @param  msg 0 個以上の置換文字列 (substitution strings)を含む JavaScript 文字列
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
@@ -25,7 +28,7 @@ export default class Logger {
   }
 
   /**
-   * @desc 情報レベルログ出力
+   * @desc 情報レベルログを出力する
    * @param  msg 0 個以上の置換文字列 (substitution strings)を含む JavaScript 文字列
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
@@ -35,7 +38,7 @@ export default class Logger {
   }
 
   /**
-   * @desc 警告レベルログ出力
+   * @desc 警告レベルログを出力する
    * @param  msg 0 個以上の置換文字列 (substitution strings)を含む JavaScript 文字列
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
@@ -45,7 +48,7 @@ export default class Logger {
   }
 
   /**
-   * @desc エラーレベルログ出力
+   * @desc エラーレベルログを出力する
    * @param  msg 0 個以上の置換文字列 (substitution strings)を含む JavaScript 文字列
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
@@ -55,3 +58,4 @@ export default class Logger {
   }
 
 }
+export default Logger

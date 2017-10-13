@@ -3,16 +3,12 @@ import Logger from '../util/logger';
 /**
  * @desc MQTTメッセージ受信後のコールバック処理クラスのインタフェース
  */
-export default class Subscriber {
+class Subscriber {
   
   /**
    * @desc コンストラクタ
    */
   constructor() {
-    /**
-     * @desc ロガー
-     * @type {Logger}
-     */
     this.logger = new Logger("Subscriber");
   }
   /**
@@ -26,3 +22,4 @@ export default class Subscriber {
     
   }
 }
+export default Subscriber 
