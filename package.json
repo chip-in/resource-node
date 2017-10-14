@@ -16,10 +16,6 @@
     "build": "babel src -s inline -d lib/",
     "clean": "del-cli lib",
     "watch": "npm run clean && babel src -s inline -d lib/ -w",
-    "example-cleanbuild": "npm run example-clean && npm run example-build",
-    "example-build": "babel examples/src -s inline -d examples/lib/ --copy-files",
-    "example-clean": "del-cli examples/lib",
-    "example-watch": "npm run example-clean && babel examples/src -s inline -d examples/lib/ --copy-files -w",
     "prepare": "npm run cleanbuild"
   },
   "devDependencies": {

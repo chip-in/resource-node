@@ -9,7 +9,7 @@ export default class StaticFileServer {
     var app = express();
     
     app.use(logger('combined'));
-    app.use(express.static(path.join(__dirname, 'public')));
+    app.use(express.static(path.join(__dirname, '../public')));
     
     app.listen(this.port);
     console.log('listening on port ' + this.port);

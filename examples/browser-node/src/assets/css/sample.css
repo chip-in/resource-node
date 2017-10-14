@@ -1,0 +1,19 @@
+a {
+  color:rgba(20,20,0,0.5);
+}
+div {
+  margin: auto;
+  text-align: center;
+}
+.example-input-form {
+  margin: auto;
+}
+.example-result {
+  border: 1px solid black;
+  height: 100px;
+  width: 90%;
+  margin: auto;
+  padding: 10px;
+  overflow: scroll;
+  text-align: left;
+}

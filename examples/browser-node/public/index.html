@@ -1,0 +1,56 @@
+<html>
+  <head>
+    <title>Resourcenode static-files example(server)</title>
+    <script lang="text/javascript" src="./dist/bundle.js"></script>
+  </head>
+  <body>
+    <div class="brand-container" id="brand-container"></div>
+
+    <div class="contents-container" class="example">
+      <h1>Hello browser node!!</h1>
+      <div id="example-mount">
+        <h2>mount / unmountn example</h2>
+        <table class="example-input-form">
+          <tr>
+            <th>operation</th>
+            <td><select name="example-mount-operation" id="example-mount-operation">
+              <option value=""></option>
+              <option value="mount">mount</option>
+              <option value="unmount">unmount</option>
+            </select></td>
+          </tr>
+          <tr>
+            <th>path</th>
+            <td><input type="text" name="example-mount-param" id="example-mount-param"></td>
+          </tr>
+        </table>
+        
+        <input type="button" name="example-mount-btn" id="example-mount-btn" value="execute">
+        <div id="example-mount-result" class="example-result"></div>
+      </div>
+
+      <div id="example-pubsub" class="example">
+        <h2>publish / subscribe example</h2>
+        <table class="example-input-form">
+          <tr>
+            <th>operation</th>
+            <td>
+              <select name="example-pubsub-operation" id="example-pubsub-operation">
+                <option value=""></option>
+                <option value="subscribe">subscribe</option>
+                <option value="unsubscribe">unsubscribe</option>
+                <option value="publish">publish</option>
+              </select></td>
+          </tr>
+          <tr>
+            <th>topic_name</th>
+            <td><input type="text" name="example-pubsub-param" id="example-pubsub-param"></td>
+          </tr>
+        </table>
+        <input type="button" name="example-pubsub-btn" id="example-pubsub-btn" value="execute">
+        <div id="example-pubsub-result" class="example-result"></div>
+      </div>
+    </div>
+    
+  </body>
+</html>

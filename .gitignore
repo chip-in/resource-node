@@ -2,5 +2,5 @@
 /npm-debug.log
 /lib
 /api
-examples/lib
-examples/src/*/node_modules
+examples/*/lib
+examples/*/node_modules
