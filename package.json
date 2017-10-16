@@ -11,7 +11,7 @@
   "license": "MIT",
   "main": "lib/index.js",
   "scripts": {
-    "jsdoc" : "jsdoc --configure jsdoc.json --template node_modules/jsdoc-baseline/ -d api -r",
+    "jsdoc": "jsdoc --configure jsdoc.json --template node_modules/jsdoc-baseline/ -d api -r",
     "cleanbuild": "npm run clean && npm run build",
     "build": "babel src -s inline -d lib/",
     "clean": "del-cli lib",
@@ -35,7 +35,8 @@
     "mqtt": "^2.13.0",
     "node-fetch": "^1.7.3",
     "socket.io-client": "^2.0.3",
-    "uuid": "^3.1.0"
+    "uuid": "^3.1.0",
+    "winston": "^2.4.0"
   },
   "publishConfig": {
     "access": "public"
