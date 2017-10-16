@@ -4,3 +4,4 @@
 /api
 examples/*/lib
 examples/*/node_modules
+examples/*/public/dist
