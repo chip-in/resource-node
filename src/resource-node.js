@@ -13,6 +13,7 @@ import DirectoryService from './util/directory-service';
 import querystring from 'querystring';
 import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
+import ConfigLoader from './util/config-loader';
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -486,50 +487,10 @@ rnode.start()
 
   _searchNodeClass(nodeClassName) {
     return Promise.resolve()
-      .then(()=>this._fetch("/c/rn/" + nodeClassName + ".json"))
-      .then((resp)=>{
-        if (resp.status !== 200) {
-          this.logger.warn("Failed to search nodeclass. sc:%s", resp.status);
-          throw new Error("Failed to search nodeclass");
-        }
-        return resp.json();
-      })
+      .then(()=>new ConfigLoader(this).load(nodeClassName))
   }
 
   _createServiceClassInstance(conf) {
-    var expandInclude = (dst, def)=>{
-      for (var k in def) {
-        if (def[k] != null && typeof def[k] === "object") {
-          if (def[k]["$include"] != null) {
-            //include
-            if (Object.keys(def[k]).length !== 1) {
-              this.logger.warn("object has '$include' and another property. It is overwritten by included object")
-            }
-            if (typeof def[k]["$include"] !== "string") {
-              this.logger.warn("Invalid configuration. '$include' must be string. ")
-              continue;
-            }
-            ((d, o, n, p)=>{
-              var promise = Promise.resolve()
-                .then(()=>this._fetch(p))
-                .then((resp)=>{
-                  if (resp.status !== 200) {
-                    this.logger.warn("Failed to search include resource(%s). sc:%s", p, resp.status);
-                    throw new Error("Failed to search include resource");
-                  }
-                  return resp.json();
-                })
-                .then((ret)=>{
-                  o[n] = JSON.parse(JSON.stringify(ret));
-                })
-              d.push(promise);
-            })(dst, def, k, def[k]["$include"])
-          } else {
-            expandInclude(dst, def[k])
-          }
-        }
-      }
-    }
     return Promise.resolve()
       .then(()=>{
         var engineConfigs = conf.serviceEngines;
@@ -537,26 +498,15 @@ rnode.start()
           this.logger.warn("serviceEngine definition not found.");
           return;
         }
-        var expandIncludeTasks = []
         engineConfigs.forEach((config) => {
           var className = config["class"];
-          this.serviceInstances.push({
+          var def = {
             "class" : className,
-            "config" : config
-          })
-          expandInclude(expandIncludeTasks, config);
+            "config" : config,
+            "instance" : new this.serviceClasses[className].initialize(config)
+          }
+          this.serviceInstances.push(def);
         });
-        return Promise.all(expandIncludeTasks)
-          .then(()=>{
-            for (var i = 0; i < this.serviceInstances.length; i++) {
-              var def = this.serviceInstances[i];
-              if (!this.serviceClasses[def.class]) {
-                this.logger.error("Class(%s) is not registered", def.class);
-                throw new Error("Class not defined:" + def.class);
-              }
-              def.instance = new this.serviceClasses[def.class].initialize(def.config);
-            }
-          });
       })
   }
 
