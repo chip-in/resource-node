@@ -1,28 +1,20 @@
 import util from 'util';
-import winston from 'winston';
 
-var defaultOption = {
-  transports: [
-    new (winston.transports.Console)({
-      level: 'info',
-      formatter : function(options) {
-        return [new Date().toISOString()
-        ,(options.level + "   ").substr(0, 5)
-        ,"["+ (options.meta.category + " ".repeat(20)).substr(0, 20) + "]"
-        , options.message
-        ].join(" ");
-      }
-    })
-  ]
+var logging = function() {
+  var msgs = [new Date().toISOString()
+    ,(arguments[0] + "   ").substr(0, 5)
+    ,"["+ (arguments[1] + " ".repeat(20)).substr(0, 20) + "]"
+    ,util.format.apply(util, Array.prototype.slice.apply(arguments, [2]))];
+
+  console.log(msgs.join(" "));
 }
+
 /**
  * @desc  ロガークラス
  */
 class Logger {
   constructor(category) {
     this.category = category || "";
-    this.meta = {category};
-    this.delegate = winston.loggers.get(category, Object.assign({},defaultOption));
   }
   
   /**
@@ -32,7 +24,7 @@ class Logger {
    *
    */
   debug(msg, substN) {
-    this.delegate.log("debug", util.format.apply(util, Array.prototype.slice.apply(arguments)), this.meta);
+    logging.apply(null, ["DEBUG", this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -42,7 +34,7 @@ class Logger {
    *
    */
   info(msg, substN) {
-    this.delegate.log("info", util.format.apply(util, Array.prototype.slice.apply(arguments)), this.meta);
+    logging.apply(null, ["INFO", this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -52,7 +44,7 @@ class Logger {
    *
    */
   warn(msg, substN) {
-    this.delegate.log("warn", util.format.apply(util, Array.prototype.slice.apply(arguments)), this.meta);
+    logging.apply(null, ["WARN", this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -62,7 +54,7 @@ class Logger {
    *
    */
   error(msg, substN) {
-    this.delegate.log("error", util.format.apply(util, Array.prototype.slice.apply(arguments)), this.meta);
+    logging.apply(null, ["ERROR", this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
 }
