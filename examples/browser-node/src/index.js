@@ -36,6 +36,9 @@ var writeMountResult = (value) => {
 var writePubSubResult = (value, append) => {
   writeResult("example-pubsub-result", value)
 }
+var writeContextResult = (value, append) => {
+  writeResult("example-context-result", value)
+}
 var node = null;
 var mountIdMap = {};
 var subscriptionMap = {};
@@ -119,9 +122,40 @@ var execPubSub = () =>{
     writePubSubResult("Failed to execute:" + e.stack);
   })
 }
+var execContext = () =>{
+  var op = document.getElementById("example-context-operation").value;
+  if (op == null || op === "") {
+    writeContextResult("operation is not specified");
+    return false;
+  }
+  if (node == null) {
+    writeContextResult("node is not initialized");
+    return false;
+  }
+  var promise = null;
+  if (op === "getContext") { 
+    var ret = node.getContext();
+    writeContextResult("Succeeded to get context:" + JSON.stringify(ret, null, 2));
+  } else if (op === "setCustomParameter") {
+    var param1 = document.getElementById("example-context-param1").value;
+    var param2 = document.getElementById("example-context-param2").value;
+    if (param1 == null || param1 === "" || param2 == null || param2 === "") {
+      writeContextResult("parameter is not specified");
+      return false;
+    }
+    node.setCustomParameter(param1, param2)
+    .then(()=>{
+      writeContextResult("Succeeded to set parameter:" + param1 + "," + param2);
+    })
+  } else {
+    writeContextResult("unexpected method name :" + op);
+    return false;
+  }
+}
 var startBtn = () =>{
   document.getElementById("example-mount-btn").onclick = execMount;
   document.getElementById("example-pubsub-btn").onclick = execPubSub;
+  document.getElementById("example-context-btn").onclick = execContext;
 }
 
 process.on('unhandledRejection', console.dir);

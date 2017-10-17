@@ -82,6 +82,18 @@ class ResourceNode {
     this.ctx = {};
 
     this.operationQueue = [];
+
+    this.contextNamespace = "net.chip-in.";
+
+    this.geoLocationTimeout = 5000;
+
+    this.geoLocationMaximumAge = 0;
+
+    this.geoLocationEnableHighAccuracy = false;
+
+    this.identity = {};
+
+    this.deviceContextName = this.contextNamespace + "dev";
   }
 
   /**
@@ -108,6 +120,7 @@ node.start()
       .then(()=>this._tryToJoinCluster())
       .then(()=>this._ensureConnected())
       .then(()=>this._enableServices())
+      .then(()=>this._initContext())
       .then(()=>this.started = true)
       .catch((e)=>{
         this.logger.error("Failed to start resource-node", e);
@@ -445,7 +458,7 @@ rnode.start()
    * @return {object} コンテキストオブジェクト
    */
   getContext() {
-    return Object.assign({}, this.ctx);
+    return Object.assign({}, this.ctx);;
   }
 
   /**
@@ -455,7 +468,97 @@ rnode.start()
    * @return {Promise} 処理完了後に応答するPromiseオブジェクト
    */
   setCustomParameter(name, value) {
+    return Promise.resolve()
+      .then(()=>{
+        if (typeof localStorage === "undefined") {
+          return;
+        }
+        localStorage.setItem(name, value);
+      })
+      //refresh
+      .then(()=>this._initContext())
+  }
 
+  _initContext() {
+    var ret = {};
+    return Promise.resolve()
+      .then(()=>this._initContextByJWT(ret))
+      .then(()=>this._initContextByDevice(ret))
+      .then(()=>this._initContextByGeoLocation(ret))
+      .then(()=>this._initContextByEnv(ret))
+      .then(()=>this._initContextByLocalStorage(ret))
+      .then(()=>this.ctx=ret)
+  }
+
+  _initContextByJWT(ret) {
+    return Promise.resolve()
+    .then(()=>Object.assign(ret, this.identity.token))
+  }
+
+  _initContextByDevice(ret) {
+    return Promise.resolve()
+    .then(()=>ret[this.deviceContextName] = this.identity.device)
+  }
+
+  _initContextByGeoLocation(ret) {
+    return Promise.resolve()
+    .then(()=>{
+      if (typeof navigator === "undefined" || typeof navigator.geolocation === "undefined" || typeof navigator.geolocation.getCurrentPosition !== "function") {
+        return;
+      }
+      return new Promise((resolve, reject)=>{
+        navigator.geolocation.getCurrentPosition((pos)=>{
+          //convert Position object to native object
+          ret[this.contextNamespace + "currentPosition"] = {
+            timestamp: pos.timestamp,
+            coords: {
+              accuracy: pos.coords.accuracy,
+              altitude: pos.coords.altitude,
+              altitudeAccuracy: pos.coords.altitudeAccuracy,
+              heading: pos.coords.heading,
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              speed: pos.coords.speed
+            }
+          };
+          resolve();
+        }, (e)=>{
+          this.logger.warn("Failed to getCurrentPosition(%s)", e.code, e);
+          //IGNORE
+          resolve();
+        },{
+          timeout : this.geoLocationTimeout,
+          maximumAge : this.geoLocationMaximumAge,
+          enableHighAccuracy : this.geoLocationEnableHighAccuracy
+        })
+      });
+    })
+  }
+
+  _initContextByEnv(ret) {
+    return Promise.resolve()
+    .then(()=>{
+      if (typeof process === "undefined" || typeof process.env === "undefined") {
+        return;
+      }
+      for(var k in process.env) {
+        ret[k] = process.env[k];
+      }
+    })
+  }
+
+  _initContextByLocalStorage(ret) {
+    return Promise.resolve()
+    .then(()=>{
+      if (typeof localStorage === "undefined") {
+        return;
+      }
+      for (var i = 0; i < localStorage.length; i++){
+        var key = localStorage.key(i);
+        var value = localStorage.getItem(key);
+        ret[key] = value;
+      }
+    })
   }
 
   _searchServiceEngine(serviceClassName, query) {
@@ -630,6 +733,7 @@ rnode.start()
           }
           this.logger.info("Succeeded to register cluster");
           this.nodeId = uuid;
+          this.identity = resp.u || {};
         });
     });
   }
