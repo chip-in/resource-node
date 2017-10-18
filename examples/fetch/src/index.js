@@ -34,28 +34,28 @@ rnode.start()
 
     return Promise.resolve()
 /* GET by path*/
-      .then(() => rnode.fetch("/c/rn/db-server.json"))
+      .then(() => rnode.fetch("/c/rn/db-server.yml"))
       .then((resp) => {
         rnode.logger.info("resp.status:" + resp.status + "(expected:" + 200 + ")");
       })
 /* GET by URL */
-      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/db-server.json"))
+      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/db-server.yml"))
       .then((resp) => {
         rnode.logger.info("resp.status:" + resp.status + "(expected:" + 200 + ")");
       })
 /* 404 */
-      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/unknown.json"))
+      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/unknown.yml"))
       .then((resp) => {
         rnode.logger.info("resp.status:" + resp.status + "(expected:" + 404 + ")");
       })
 /* HEAD  */
-      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/db-server.json", { method: "HEAD" }))
+      .then(() => rnode.fetch(coreNodeUrl + "/c/rn/db-server.yml", { method: "HEAD" }))
       .then((resp) => {
         rnode.logger.info("resp.status:" + resp.status + "(expected:" + 200 + ")"); 
       })
 /* HEADERS */
       .then(() => {
-        return rnode.fetch(coreNodeUrl + "/c/rn/db-server.json", { headers: { "User-Agent": "test" } })
+        return rnode.fetch(coreNodeUrl + "/c/rn/db-server.yml", { headers: { "User-Agent": "test" } })
       })
       .then((resp) => {
         rnode.logger.info("resp.status:" + resp.status + "(expected:" + 200 + ")"); 

@@ -5,7 +5,7 @@ export default class DirectoryService {
   
   constructor() {
     this.root = {};
-    this.logger = new Logger();
+    this.logger = new Logger("DirectoryService");
   }
 
   lookup(path) {
@@ -66,6 +66,13 @@ export default class DirectoryService {
     var target = this.root;
     for (var i = 0; i < names.length; i++) {
       var name = names[i];
+      if (name == "") {
+        continue;
+      }
+      if (target.children == null) {
+        target = null;
+        break;
+      }
       target = target.children[name];
       if (!target) {
         break;
