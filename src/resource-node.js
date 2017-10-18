@@ -603,6 +603,9 @@ rnode.start()
         }
         engineConfigs.forEach((config) => {
           var className = config["class"];
+          if (this.serviceClasses[className] == null) {
+            throw new Error("serviceClass(" + className + ") is not defined.")
+          }
           var def = {
             "class" : className,
             "config" : config,
@@ -829,7 +832,7 @@ rnode.start()
     //unmount all
     return Promise.all(Object.keys(this.proxies).map((p)=>this._unmount(p)))
       .then(()=>Array.prototype.slice.call(this.serviceInstances).reverse().reduce((prev, current)=>{
-        return prev.then(()=>current.instance.stop())
+        return prev.then(()=>current.instance.stop(this))
       }, Promise.resolve()))
       .then(()=>{
         this.serviceInstances = [];
