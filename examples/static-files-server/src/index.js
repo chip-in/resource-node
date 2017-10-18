@@ -1,28 +1,104 @@
-import StaticFileServer from './server';
 import webClient from 'request';
 import { ResourceNode, ServiceEngine, Proxy, Subscriber } from '../../..';
+import http from 'http';
 
 process.on('unhandledRejection', console.dir);
 
-//var coreNodeUrl = "http://test-core.chip-in.net:8080";
-var coreNodeUrl = "http://test-core.chip-in.net:8080";
-var path = "/a/static-files-server/"
-var mode = "singletonMaster";
+console.log(process.argv.length);
+if (process.argv.length !== 4) {
+  console.log("Usage: npm start -- " +
+              "<core_node_url(e.g. 'http://test-core.chip-in.net')> "+
+              "<node_class(e.g. 'static-file-server-example')> ")
+  process.exit(0);
+}
+var coreNodeUrl = process.argv[2];
+var nodeClass =  process.argv[3];
 
-class RestConnector extends ServiceEngine { }
-class DatabaseRegistry extends ServiceEngine { }
-class ContextManager extends ServiceEngine { }
-class UpdateManager extends ServiceEngine { }
-class SubsetStorage extends ServiceEngine { }
+class SignalHandler {
+  constructor(node) {
+    this.targets = ["SIGINT", "SIGTERM"];
+    this.node = node;
+    this._init();
+  }
+  _init() {
+    this.targets.map((s)=>process.on(s, ()=>{
+      this.node.logger.info("Shutdown process start.");
+      this._execShutdown();
+    }));
+  }
+  _execShutdown() {
+    this.node.stop()
+    .then(()=>{
+      this.node.logger.info("Shutdown process has completed.");
+      setImmediate(function() {
+				process.exit(0);
+			});
+    })
+  }
+}
+class StaticFileServer extends ServiceEngine{
+  constructor(option) {
+    super(option);
+    this.port = 13000;
+    this.path = option.path;
+    this.mode = option.mode;
+  }
+  
+  start(node) {
+    return Promise.resolve()
+      .then(()=>this._startWebServer())
+      .then(()=>node.mount(this.path, this.mode, new ReverseProxy(node, this.path, this.port)))
+      .then((ret)=>this.mountId = ret)
+      .then(()=>node.logger.info("Static-files-server started. Try to access '" + coreNodeUrl + this.path + "'"))
+  }
+
+  stop(node) {
+    return Promise.resolve()
+      .then(()=>{
+        if (this.server == null) {
+          return Promise.resolve();
+        }
+        return this._stopWebServer();
+      })
+  }
+
+  _startWebServer() {
+    return Promise.resolve()
+      .then(()=>{
+        var express = require('express');
+        var logger = require('morgan');
+        var path = require('path');
+        var app = express();
+        
+        app.use(logger('combined'));
+        app.use(express.static(path.join(__dirname, '../public')));
+
+        this.server = http.createServer(app);
+        this.server.listen(this.port);
+        console.log('listening on port ' + this.port);
+      })
+  }
+  _stopWebServer() {
+    return Promise.resolve()
+      .then(()=>{
+        this.server.close();
+      })
+  }
+
+  getPort() {
+    return this.port;
+  }
+}
+
 class ReverseProxy extends Proxy {
-  constructor(rnode, path, server) {
+  constructor(rnode, path, port) {
     super();
     this.rnode = rnode;
     if (path == null) {
       throw new Error("Path is empty")
     }
     this.basePath = path[path.length - 1] !== "/" ? path + "/" : path;
-    this.be = server;
+    this.port = port;
   }
   onReceive(req, res) {
     return Promise.resolve()
@@ -32,9 +108,9 @@ class ReverseProxy extends Proxy {
           this.rnode.logger.error("This sample support only GET|POST method.");
           return Promise.reject(new Error("This sample support only GET|POST method."));
         }
-        if (path.indexOf(this.basePath) !== 0) {
-          this.rnode.logger.error("Unexpected path is detected:" + path);
-          return Promise.reject(new Error("Unexpected path is detected:" + path));
+        if (req.url.indexOf(this.basePath) !== 0) {
+          this.rnode.logger.error("Unexpected path is detected:" + req.url);
+          return Promise.reject(new Error("Unexpected path is detected:" + req.url));
         }
         return new Promise((resolve, reject)=>{
           var cb = (e, r, b)=> {
@@ -50,7 +126,7 @@ class ReverseProxy extends Proxy {
             resolve(res);
           };
 
-          var url = "http://localhost:" + this.be.getPort() + String(req.url).substr(this.basePath.length-1);
+          var url = "http://localhost:" + this.port + String(req.url).substr(this.basePath.length-1);
           var option = {
             url,
             headers: req.headers,
@@ -80,28 +156,14 @@ class ReverseProxy extends Proxy {
 
   }
 }
-var rnode = new ResourceNode(coreNodeUrl, "db-server");
+var rnode = new ResourceNode(coreNodeUrl, nodeClass);
 rnode.registerServiceClasses({
-  RestConnector,
-  DatabaseRegistry,
-  ContextManager,
-  UpdateManager,
-  SubsetStorage
+  StaticFileServer
 });
-var mountId = null;
 rnode.start()
   .then(() => {
+    new SignalHandler(rnode);
     rnode.logger.info("Succeeded to start resource-node");
-    var server = new StaticFileServer();
-    return Promise.resolve()
-      .then(()=>server.start())
-      .then(()=>rnode.mount(path, mode, new ReverseProxy(rnode, path, server))) 
-      .then((ret) => {
-        mountId = ret;
-      })
-      .then(()=>{
-        rnode.logger.info("Static-files-server started. Try to access '" + coreNodeUrl + path + "'");
-      })
   }).catch((e) => {
     rnode.logger.info("Failed to start resource-node", e);
     rnode.stop();
