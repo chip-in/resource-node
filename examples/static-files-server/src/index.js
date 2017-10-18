@@ -4,7 +4,6 @@ import http from 'http';
 
 process.on('unhandledRejection', console.dir);
 
-console.log(process.argv.length);
 if (process.argv.length !== 4) {
   console.log("Usage: npm start -- " +
               "<core_node_url(e.g. 'http://test-core.chip-in.net')> "+

@@ -4,7 +4,6 @@ import http from 'http';
 
 process.on('unhandledRejection', console.dir);
 
-console.log(process.argv.length);
 if (process.argv.length !== 4) {
   console.log("Usage: npm start -- " +
               "<core_node_url(e.g. 'http://test-core.chip-in.net')> "+
@@ -65,7 +64,7 @@ class ReverseProxy extends Proxy {
       throw new Error("Path is empty")
     }
     this.basePath = path[path.length - 1] !== "/" ? path + "/" : path;
-    this.forwardPath = forwardPath;
+    this.forwardPath = forwardPath[forwardPath.length - 1] === "/" ? forwardPath.substr(0, forwardPath.length - 1) : forwardPath;
   }
   onReceive(req, res) {
     return Promise.resolve()
@@ -75,7 +74,7 @@ class ReverseProxy extends Proxy {
           return Promise.reject(new Error("Unexpected path is detected:" + req.url));
         }
         return new Promise((resolve, reject)=>{
-          var url = this.forwardPath + String(req.url).substr(this.basePath.length);
+          var url = this.forwardPath + String(req.url).substr(this.basePath.length - 1);
           var cb = (e, r, b)=> {
             if (e) {
               this.rnode.logger.error("Failed to proxy backend", e);
