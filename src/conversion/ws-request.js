@@ -1,4 +1,5 @@
 import EventEmitter from 'events'
+import intoStream from 'into-stream'
 
 export default class WSRequest {
   constructor(msg) {
@@ -9,23 +10,25 @@ export default class WSRequest {
       if(msg && msg.m && msg.m.req) this[n] = msg.m.req[n]
     });
     this.aborted = false;
-    this.em = new EventEmitter();
-    this.em.on("close", ()=>{
+    //delegate for stream.Readable interface
+    this.stream = intoStream(this.body && Object.keys(this.body).length !== 0 ? JSON.stringify(this.body) : "");
+    this.stream.on("close", ()=>{
       if (this.timeoutId) {
         clearTimeout(timeoutId);
       }
-    });
+    })
   }
 
-  on() {
-    this.em.on.apply(this.em, Array.prototype.slice.call(arguments));
+  on(evt) {
+    //delegate
+    this.stream.on.apply(this.stream, Array.prototype.slice.call(arguments));
   }
   emit() {
-    this.em.emit.apply(this.em, Array.prototype.slice.call(arguments));
+    this.stream.emit.apply(this.stream, Array.prototype.slice.call(arguments));
   }
   destroy(e) {
     this.aborted = true;
-    this.em.emit("error", e);
+    this.stream.destroy(e);
   }
   setTimeout(ms, cb) {
     this.timeoutId = setTimeout(()=>{
@@ -33,5 +36,32 @@ export default class WSRequest {
       cb();
     },ms);
   }
-
+  //implementation stream.Readable
+  isPaused(){
+    return this.stream.isPaused();
+  }
+  pause() {
+    return this.stream.pause();
+  }
+  pipe(destination, options) {
+    return this.stream.pipe(destination, options);
+  }
+  read(size) {
+    return this.stream.read(size);
+  }
+  resume() {
+    return this.stream.resume();
+  }
+  setEncoding(enc) {
+    return this.stream.setEncoding(enc);
+  }
+  unpipe(destination) {
+    return this.stream.unpipe(destination);
+  }
+  unshift(chunk) {
+    return this.stream.ushift(chunk);
+  }
+  wrap(stream) {
+    return this.stream.wrap(stream);
+  }
 }

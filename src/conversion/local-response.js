@@ -1,10 +1,8 @@
 import WSResponse from './ws-response';
 
 export default class LocalResponse extends WSResponse{
-  constructor(res, rej, req) {
-    super({}, res, rej, req);
-    this.res = res;
-    this.rej = rej;
+  constructor(req) {
+    super({}, req);
     this.req = req;
     this.url = req.url;
   }

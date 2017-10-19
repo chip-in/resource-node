@@ -657,7 +657,7 @@ rnode.start()
   _localFetch(requestHref, option, localService) {
     return new Promise((res, rej)=>{
       var req = new LocalRequest(requestHref, option);
-      var res = new LocalResponse(res, rej, req);
+      var res = new LocalResponse(req);
       localService.proxy.onReceive(req, res)
     })
   }
@@ -677,7 +677,7 @@ rnode.start()
     var ret = {};
     if (obj instanceof Headers) {
       ret = {};
-      for (var k in obj.keys()) {
+      for (var k in Object.keys(obj)) {
         var val = obj.getAll(k);
         ret[k] = val.length > 1 ? val : val[0];
       }
@@ -758,7 +758,7 @@ rnode.start()
       var mountId = msg.m.mountId;
       var proxy = this.proxies[mountId];
       var req = new WSRequest(msg);
-      var resp = new WSResponse(msg, resolve, reject, req);
+      var resp = new WSResponse(msg, req);
       if (!proxy) {
         this.logger.warn("proxy instance not found");
         resp.status(404).end();
@@ -775,12 +775,11 @@ rnode.start()
           respMsg.m = Object.assign({}, resp);
           respMsg.t = "response";
           this._send(respMsg);
-        // .then(()=>this._send(Object.assign({a : true}, msg)))
+          resolve();
         }).catch((e)=>{
           this.logger.error("Failed to proxy service", e);
         });
       }
-      //waiting until invocation of resp.end
       });
   }
   _leaveCluster() {

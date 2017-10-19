@@ -15,8 +15,22 @@ class ProxyImpl extends Proxy {
   onReceive(req, res) {
     return Promise.resolve()
     .then(()=>{
-      res.send(JSON.stringify(req));
-      return res;
+      return new Promise((resolve, reject)=>{
+        var postData = "";
+        req.on("data", (chunk)=>{
+          postData += chunk;
+        });
+        req.on("end", ()=>{
+          console.log("PostData=>" + postData);
+          res.writeHead(200, {
+            "Content-Type": "application/json"
+            , "Access-Control-Allow-Origin": "*"
+          });
+          res.write(JSON.stringify(req));
+          res.end();
+          resolve(res);
+        })
+      })
     })
   }
 }
@@ -64,9 +78,12 @@ rnode.start()
             .then((mountId)=>ids.push(mountId))
             .then(()=>rnode.fetch(path + "/post.txt", {
               "method" : "POST",
-              "body" : {
+              "body" : JSON.stringify({
                 "param1" : "value1",
                 "param2" : 2
+              }),
+              headers : {
+                "Content-Type": "application/json"
               }
             }))
             .then((resp)=> resp.text())

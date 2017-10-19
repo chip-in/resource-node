@@ -2,10 +2,8 @@ import buffer from 'buffer';
 
 var Buffer = buffer.Buffer;
 export default class WSResponse {
-  constructor(msg, res, rej, req) {
+  constructor(msg, req) {
     this.msg = msg;
-    this.res = res;
-    this.rej = rej;
     this.req = req;
     this.cookies = []
     if (msg.cookies) {
@@ -34,7 +32,7 @@ export default class WSResponse {
   end(data, encoding, cb) {
     this.write(data, encoding, cb);
     Promise.resolve()
-      .then(() => this._answer())
+      .then(() => this._end())
       .then(() => {
         if (typeof cb === "function") cb();
       });
@@ -51,11 +49,11 @@ export default class WSResponse {
   }
   send(body) {
     this.body = body;
-    this._answer();
+    this._end();
   }
   sendStatus(sc) {
     this.statusCode = sc;
-    this._answer();
+    this._end();
   }
   set(field, value) {
     this.headers[field] = [];
@@ -75,7 +73,7 @@ export default class WSResponse {
     return this.get(h);
   }
   getHeaderNames() {
-    return this.headers.keys();
+    return Object.keys(this.headers);
   }
   getHeaders() {
     return this.headers;
@@ -91,6 +89,7 @@ export default class WSResponse {
   }
   setTimeout(ms, cb) {
     this.timeoutId = setTimeout(()=>{
+      this.timeoutId = null;
       this.status(503)
       this.end("WSResponse: response timeout");
       if (typeof cb === "function") cb();
@@ -122,25 +121,34 @@ export default class WSResponse {
   }
   writeContinue() {
     this.status(101)
-    this._answer();
+    this._end();
   }
   writeHead(sc, statusMessage, headers) {
     this.status(sc);
-    headers.keys().map((k)=>this.append(k, headers[k]));
+    if (headers == null && typeof statusMessage === "object") {
+      headers = statusMessage;
+      statusMessage = null;
+    }
+    if (headers == null) {
+      return;
+    }
+    Object.keys(headers).map((k)=>this.append(k, headers[k]));
   }
 
-  _answer() {
-    if (this.answered) {
-      return Promise.resolve(this);
-    }
+  _end() {
     return Promise.resolve()
-      .then(()=>this.answered = true)
-      .then(()=>{
-        if (this.timeoutId) {
-          clearTimeout(timeoutId);
-        }
-      }).then(()=>{
-        this.req.emit("close");
-      }).then(()=>this.res(this));
+    .then(()=>{
+      if (this.answered) {
+        return Promise.resolve(this);
+      }
+      this.answered = true
+      return Promise.resolve()
+        .then(()=>{
+          if (this.timeoutId) {
+            clearTimeout(timeoutId);
+            this.timeoutId = null;
+          }
+        }).then(()=>this.req.emit("close"))
+    })
   }
 }
