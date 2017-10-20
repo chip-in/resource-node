@@ -17,7 +17,6 @@ export default class WSResponse {
     this.headers = {};
     this.statusCode = 200;
     this.answered = false;
-    this.body = "";
   }
   append(field, value) {
     this.headers[field] = this.headers[field] || [];
@@ -108,7 +107,11 @@ export default class WSResponse {
       return;
     }
     if (typeof chunk === "string") {
-      this.body += chunk;
+      if (this.body != null) {
+        this.body += chunk;
+      } else {
+        this.body = chunk;
+      }
     } else if (Buffer.isBuffer(chunk)) {
       if (this.body != null) {
         this.body = Buffer.concat(this.body, chunk);
@@ -117,7 +120,11 @@ export default class WSResponse {
       }
     } else if (chunk != null) {
       //???
-      this.body += chunk.toString();
+      if (this.body != null) {
+        this.body += chunk.toString();
+      } else {
+        this.body = chunk.toString();
+      }
     }
   }
   writeContinue() {
