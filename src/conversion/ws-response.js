@@ -17,6 +17,7 @@ export default class WSResponse {
     this.headers = {};
     this.statusCode = 200;
     this.answered = false;
+    this.body = "";
   }
   append(field, value) {
     this.headers[field] = this.headers[field] || [];
