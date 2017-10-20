@@ -56,11 +56,12 @@ var execMount = function() {
   }
   var promise = null;
   if (op === "mount") {
-    promise = node.mount(param, "loadBalancing", new EchoBack())
+    var param2 = document.getElementById("example-mount-param2").value;
+    promise = node.mount(param, param2, new EchoBack())
     .then((mountId)=>{
       mountIdMap[param] = mountIdMap[param] || [];
       mountIdMap[param].push(mountId);
-      writeMountResult("Succeeded to mount path:" + param);
+      writeMountResult("Succeeded to mount path:" + param + "," + param2);
     })
   } else if (op === "unmount") {
     var target = mountIdMap[param];
@@ -71,6 +72,7 @@ var execMount = function() {
     promise = Promise.all(mountIdMap[param].map((id)=>{
       return node.unmount(id);
     }))
+    delete mountIdMap[param];
   } else {
     writeMountResult("unexpected method name :" + op);
     return false;
