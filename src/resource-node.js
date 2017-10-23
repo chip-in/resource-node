@@ -655,11 +655,9 @@ rnode.start()
       (urlObj.port || defaultPort) === (corenodeUrlObj.port || defaultPort));
   }
   _localFetch(requestHref, option, localService) {
-    return new Promise((res, rej)=>{
-      var req = new LocalRequest(requestHref, option);
-      var res = new LocalResponse(req);
-      localService.proxy.onReceive(req, res)
-    })
+    var req = new LocalRequest(requestHref, option);
+    var res = new LocalResponse(req);
+    return localService.proxy.onReceive(req, res)
   }
 
   _setAuthorizationHeader(option, userId, userPassword) {
