@@ -635,6 +635,7 @@ rnode.start()
         return Promise.reject("Invalid url is specified:%s", path);
     }
     option = option || {};
+    this._normalizeHeader(option);
     this._setAuthorizationHeader(option, this.userId, this.password);
 
     var urlObj = url.parse(href);
@@ -655,6 +656,7 @@ rnode.start()
       (urlObj.port || defaultPort) === (corenodeUrlObj.port || defaultPort));
   }
   _localFetch(requestHref, option, localService) {
+    this._convertHeaderToLowerCase(option);
     var req = new LocalRequest(requestHref, option);
     var res = new LocalResponse(req);
     return localService.proxy.onReceive(req, res)
@@ -666,24 +668,47 @@ rnode.start()
     }
     var headers = option.headers;
     if (!headers) {
-      headers = option.headers = new Headers();
+      headers = option.headers = {};
     }
-    headers.append('Authorization', 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64"))
+    headers['Authorization'] = 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64");
   }
 
-  _normalizeHeader(obj) {
-    var ret = {};
-    if (obj instanceof Headers) {
-      ret = {};
-      for (var k in Object.keys(obj)) {
-        var val = obj.getAll(k);
-        ret[k] = val.length > 1 ? val : val[0];
-      }
-    } else if (obj && typeof obj === "object" ) {
-      ret = obj;
+  _normalizeHeader(option) {
+    if (option == null) {
+      return;
     }
-    return ret;
+    var headers = option.headers;
+    if (!headers) {
+      headers = option.headers = {};
+    }
+    var tmp = {};
+    //convert to native object
+    if (headers instanceof Headers) {
+      tmp = {};
+      for (var k in Object.keys(headers)) {
+        var val = headers.getAll(k);
+        tmp[k] = val.length > 1 ? val : val[0];
+      }
+    } else if (headers && typeof headers === "object" ) {
+      tmp = Object.assign(tmp, headers);
+    }
+    option.headers = tmp;
   }
+  _convertHeaderToLowerCase(option) {
+    if (option == null) {
+      return;
+    }
+    var headers = option.headers;
+    if (!headers) {
+      return;
+    }
+    var ret = {};
+    for (var k in headers) {
+      ret[k.toLowerCase()] = headers[k];
+    }
+    option.headers = ret;
+  }
+
   _tryToJoinCluster() {
     return Promise.resolve()
       .then(()=>{

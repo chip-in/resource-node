@@ -1,6 +1,16 @@
 import EventEmitter from 'events'
 import intoStream from 'into-stream'
 
+var isRawFormat = (body) => {
+  if (body == null) {
+    return false;
+  }
+  if (typeof body === "string" ||
+    (typeof Buffer !== "undefined" && body instanceof Buffer)) {
+      return true;
+  }
+  return false;
+}
 export default class WSRequest {
   constructor(msg) {
     var names = ["baseUrl","body","cookies","fresh","hostname","ip","method",
@@ -11,7 +21,13 @@ export default class WSRequest {
     });
     this.aborted = false;
     //delegate for stream.Readable interface
-    this.stream = intoStream(this.body && Object.keys(this.body).length !== 0 ? JSON.stringify(this.body) : "");
+    var input = "";
+    if (isRawFormat(this.body)) {
+      input = this.body;
+    } else if (this.body != null && Object.keys(this.body).length !== 0) {
+      input = JSON.stringify(this.body)
+    }
+    this.stream = intoStream(input);
     this.stream.on("close", ()=>{
       if (this.timeoutId) {
         clearTimeout(timeoutId);

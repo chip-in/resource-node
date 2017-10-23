@@ -6,9 +6,24 @@ class EchoBack extends Proxy {
   onReceive(req, res) {
     return Promise.resolve()
       .then(() => {
-        writeMountResult("received request(" + [req.ip, req.method, req.url].join(" ") + ")");
-        res.send(JSON.stringify(req));
-        return res;
+        return new Promise((resolve, reject)=>{
+          var postData = "";
+          req.on("data", (chunk)=>{
+            postData += chunk;
+          });
+          req.on("end", ()=>{
+            writeMountResult("received request(" + [req.ip, req.method, req.url, postData].join(" ") + ")");
+            res.writeHead(200, {
+              "Content-Type": "application/json"
+              , "Access-Control-Allow-Origin": "*"
+            });
+            res.write(JSON.stringify(req));
+            res.end();
+            resolve(res);
+          })
+        })
+        
+        
       })
   }
 }
@@ -54,6 +69,7 @@ var execMount = function() {
     writeMountResult("node is not initialized");
     return false;
   }
+  node.setBasicAuthorization("username", "password")
   var promise = null;
   if (op === "mount") {
     var param2 = document.getElementById("example-mount-param2").value;
@@ -73,6 +89,19 @@ var execMount = function() {
       return node.unmount(id);
     }))
     delete mountIdMap[param];
+  } else if (op === "fetch_get") {
+    promise = node.fetch(param)
+  } else if (op === "fetch_post") {
+    promise = node.fetch(param, {
+      "method" : "POST",
+      "body" : JSON.stringify({
+        "param1" : "value1",
+        "param2" : 2
+      }),
+      headers : {
+        "Content-Type": "application/json"
+      }
+    })
   } else {
     writeMountResult("unexpected method name :" + op);
     return false;

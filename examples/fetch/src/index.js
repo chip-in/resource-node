@@ -14,10 +14,25 @@ class SubsetStorage extends ServiceEngine { }
 class ProxyImpl extends Proxy {
   onReceive(req, res) {
     return Promise.resolve()
-      .then(() => {
-        res.send(JSON.stringify(req));
-        return res;
+    .then(()=>{
+      return new Promise((resolve, reject)=>{
+        var postData = "";
+        req.on("data", (chunk)=>{
+          postData += chunk;
+        });
+        req.on("end", ()=>{
+          console.log("PostData=>" + postData);
+          res.writeHead(200, {
+            "Content-Type": "application/json"
+            , "Access-Control-Allow-Origin": "*"
+          });
+          var body = req.headers && req.headers["authorization"] ? req.headers && req.headers["authorization"] : JSON.stringify(req);
+          res.write(body);
+          res.end();
+          resolve(res);
+        })
       })
+    })
   }
 }
 var rnode = new ResourceNode(coreNodeUrl, "db-server");
@@ -71,6 +86,52 @@ rnode.start()
             rnode.logger.info("error:" + e);
           })
       })
+/*setBasicAuthorization, POST, localOnly*/
+      .then(()=>{
+        return rnode.mount("/a/test_fetch_header", "localOnly", new ProxyImpl())
+          .then((mountId)=>{
+            var username = "username";
+            var password = "password";
+            var expected = "Basic " + new Buffer(username + ":" + password).toString("base64");
+            rnode.setBasicAuthorization(username, password)
+            return rnode.fetch("/a/test_fetch_header", {
+                "method" : "POST",
+                "body" : JSON.stringify({
+                  "param1" : "value1",
+                  "param2" : 2
+                }),
+                headers : {
+                  "Content-Type": "application/json"
+                }
+              })
+              .then((resp)=>resp.text())
+              .then((val)=>rnode.logger.info("resp.body:" + val + "(assertEqual:" + (val === expected) + ")"))
+              .then(()=>rnode.unmount(mountId))
+          })
+      })
+      /*setBasicAuthorization, POST, singletonMaster*/
+            .then(()=>{
+              return rnode.mount("/a/test_fetch_header", "singletonMaster", new ProxyImpl())
+                .then((mountId)=>{
+                  var username = "username";
+                  var password = "password";
+                  var expected = "Basic " + new Buffer(username + ":" + password).toString("base64");
+                  rnode.setBasicAuthorization(username, password)
+                  return rnode.fetch("/a/test_fetch_header", {
+                      "method" : "POST",
+                      "body" : JSON.stringify({
+                        "param1" : "value1",
+                        "param2" : 2
+                      }),
+                      headers : {
+                        "Content-Type": "application/json"
+                      }
+                    })
+                    .then((resp)=>resp.text())
+                    .then((val)=>rnode.logger.info("resp.body:" + val + "(assertEqual:" + (val === expected) + ")"))
+                    .then(()=>rnode.unmount(mountId))
+                })
+            })
       .then(()=> rnode.stop())
   }).catch((e) => {
     rnode.logger.info("Failed to start resource-node", e);
