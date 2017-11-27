@@ -9,7 +9,7 @@ class ServiceEngine {
    * @param {object} [option] コアノードに登録された構成情報
    */
   constructor(option) {
-    this.logger = new Logger("ServiceEngine");
+    this.logger = new Logger(this.constructor.name);
   }
 
   /**
