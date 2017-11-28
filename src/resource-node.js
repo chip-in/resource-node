@@ -156,7 +156,7 @@ node.stop()
 
   /**
    * @desc サービスクラスに対応する実装クラスを登録する
-   * @param {array} classes  キーにサービスクラス、値にサービスクラス実装のクラスオブジェクト
+   * @param {object} classes  キーにサービスクラス、値にサービスクラス実装のクラスオブジェクト
    * @example
    * // registerServiceClasses でサービスを実装するクラスを登録する
 node.registerSerivceClasses({
