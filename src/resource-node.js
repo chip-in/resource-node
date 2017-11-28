@@ -325,7 +325,7 @@ rnode.start()
           password: this.password
         });
         client.on("connect", (connack) => {
-          client.subscribe(topicName, {}, (e, g) => {
+          client.subscribe(topicName, {qos: 1}, (e, g) => {
             this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
             if (!responded) {
               responded = true;
@@ -413,7 +413,7 @@ rnode.start()
           password : this.password
         });
         client.on("connect", ()=>{
-          client.publish(topicName, message, (e)=>{
+          client.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
             client.end();
             delete this.mqttClientConnections[key];
             if (e) {
