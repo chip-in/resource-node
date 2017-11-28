@@ -172,15 +172,10 @@ node.registerSerivceClasses({
       return;
     }
     for (var k in classes) {
-      var classConstructor = classes[k];
-      var name = classConstructor.name;
-      this.serviceClasses[name] = {
-        initialize : classConstructor
+      this.serviceClasses[k] = {
+        initialize : classes[k]
       }
     }
-    // Object.keys(Object.assign({}, classes)).map((c)=> this.serviceClasses[c.name] = {
-    //   initialize : c
-    // });
   }
 
   /**
