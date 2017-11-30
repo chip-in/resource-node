@@ -2,13 +2,14 @@ import { ResourceNode, ServiceEngine, Proxy, Subscriber } from '../../..';
 
 process.on('unhandledRejection', console.dir);
 
-var coreNodeUrl = "http://test-core.chip-in.net:8080";
+var coreNodeUrl = "http://test-core.chip-in.net:80";
 
 class RestConnector extends ServiceEngine { }
 class DatabaseRegistry extends ServiceEngine { }
 class ContextManager extends ServiceEngine { }
 class UpdateManager extends ServiceEngine { }
 class SubsetStorage extends ServiceEngine { }
+class QueryHandler extends ServiceEngine { }
 class SubscriberImpl extends Subscriber {
   onReceive(msg) {
     rnode.logger.info("Receive MQTT message:", msg.toString());
@@ -20,7 +21,8 @@ rnode.registerServiceClasses({
   DatabaseRegistry,
   ContextManager,
   UpdateManager,
-  SubsetStorage
+  SubsetStorage,
+  QueryHandler
 });
 rnode.start()
   .then(() => {

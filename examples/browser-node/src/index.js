@@ -198,6 +198,7 @@ class DatabaseRegistry extends ServiceEngine { }
 class ContextManager extends ServiceEngine { }
 class UpdateManager extends ServiceEngine { }
 class SubsetStorage extends ServiceEngine { }
+class QueryHandler extends ServiceEngine { }
 
 var startNode = () =>{
   var rnode = new ResourceNode(coreNodeUrl, "db-server");
@@ -206,7 +207,8 @@ var startNode = () =>{
     DatabaseRegistry,
     ContextManager,
     UpdateManager,
-    SubsetStorage
+    SubsetStorage,
+    QueryHandler
   });
   rnode.start()
     .then(() => {

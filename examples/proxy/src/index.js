@@ -2,7 +2,7 @@ import {ResourceNode, ServiceEngine, Proxy, Subscriber} from '../../..';
 
 process.on('unhandledRejection', console.dir);
 
-var coreNodeUrl = "http://test-core.chip-in.net:8080";
+var coreNodeUrl = "http://test-core.chip-in.net:80";
 
 var mode = process.argv[2] || "singletonMaster";
 
@@ -11,6 +11,7 @@ class DatabaseRegistry extends ServiceEngine {}
 class ContextManager extends ServiceEngine {}
 class UpdateManager extends ServiceEngine {}
 class SubsetStorage extends ServiceEngine {}
+class QueryHandler extends ServiceEngine { }
 class ProxyImpl extends Proxy {
   onReceive(req, res) {
     return Promise.resolve()
@@ -40,7 +41,8 @@ rnode.registerServiceClasses({
   DatabaseRegistry,
   ContextManager,
   UpdateManager,
-  SubsetStorage
+  SubsetStorage,
+  QueryHandler
 });
 rnode.start()
   .then(()=>{
