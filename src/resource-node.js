@@ -352,7 +352,7 @@ rnode.start()
   }
 
   _createMQTTUrl() {
-    var mqttProto = process.env.CNODE_MQTT_PROTO || 'ws';
+    var mqttProto = process.env.CNODE_MQTT_PROTO || (this.coreNodeURL.indexOf("https://") === 0) ? 'wss' : 'ws';
     var coreUrl = url.parse(this.coreNodeURL);
     var coreHost = coreUrl.host;
     var port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
