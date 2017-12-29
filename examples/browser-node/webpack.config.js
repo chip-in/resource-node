@@ -45,12 +45,14 @@ module.exports = {
       /* request */
       '/r/' : {
         target: CORE_NODE_URL,
-        secure: false
+        secure: false,
+        ws: true
       },
       /* mqtt */
-      '/m/' : {
+      '/m' : {
         target: CORE_NODE_URL,
-        secure: false
+        secure: false,
+        ws: true
       },
       /* node registration */
       '/n/' : {
