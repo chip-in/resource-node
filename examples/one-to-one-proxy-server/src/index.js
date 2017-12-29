@@ -13,6 +13,9 @@ if (process.argv.length !== 4) {
 var coreNodeUrl = process.argv[2];
 var nodeClass =  process.argv[3];
 
+var jwtToken = process.env.ACCESS_TOKEN;
+var jwtRefreshPath = process.env.TOKEN_UPDATE_PATH;
+
 class SignalHandler {
   constructor(node) {
     this.targets = ["SIGINT", "SIGTERM"];
@@ -124,6 +127,9 @@ var rnode = new ResourceNode(coreNodeUrl, nodeClass);
 rnode.registerServiceClasses({
   OneToOneProxyServer
 });
+if (jwtToken) {
+  rnode.setJWTAuthorization(jwtToken, jwtRefreshPath);
+}
 rnode.start()
   .then(() => {
     new SignalHandler(rnode);
