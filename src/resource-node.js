@@ -53,6 +53,10 @@ class ResourceNode {
 
     this.password = null;
 
+    this.jwt = null;
+
+    this.jwtUpdatepath = null;
+
     /**
      * @desc 起動状態を表すフラグ
      * @type {boolean}
@@ -319,10 +323,11 @@ rnode.start()
       return new Promise((resolve, reject) => {
         var responded = false;
         var mqttUrl = this._createMQTTUrl();
+        var wsOptions = {}
+        this._setAuthorizationHeader(wsOptions);
         var client = mqtt.connect(mqttUrl, {
           keepalive: 30,
-          username: this.userId,
-          password: this.password
+          wsOptions
         });
         client.on("connect", (connack) => {
           client.subscribe(topicName, {qos: 1}, (e, g) => {
@@ -445,6 +450,69 @@ rnode.start()
     this.userId = userId;
     this.password = password;
   }
+
+  setJWTAuthorization(jwt, updatePath ) {
+    this.jwt = jwt;
+    this.jwtUpdatepath = updatePath;
+    this._startJWTRefreshProcess();
+  }
+  _startJWTRefreshProcess() {
+    if (this.jwt == null) {
+      return;
+    }
+    if (this.isRefreshRunning) {
+      return;
+    }
+    this.isRefreshRunning = true;
+    var path = this.jwtUpdatepath || "/core.JWTUpdate"
+    if (path.indexOf("/") !== 0) {
+      path = "/" + path;
+    }
+    var url = this.coreNodeURL + path;
+    try {
+      var that = this;
+      var decodeJwt = function (jwt) {
+        return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+      }
+      var refreshToken = function refreshToken() {
+        var option = {mode: 'cors'};
+        that._setAuthorizationHeader(option);
+        fetch(url, option)
+          .then(function(response) {
+            if (response.status == 401) {
+              return Promise.reject("invalid session");
+            } else if (! response.ok) {
+              return Promise.reject("Failed to refresh token" +  response.statusText);
+            }
+            return response.json();
+          })
+          .then(result => {
+            that.jwt = result.access_token;
+            setTimer();
+          }).catch(function(reason) {
+            that.logger.error("fail! reason=" + reason);
+          });
+      }
+      var setTimer = function setTimer() {
+        var token = decodeJwt(that.jwt);
+        var currentMills = new Date().getTime();
+        var currentTime = Math.round(currentMills / 1000);
+        that.logger.info("current time = " + currentTime + " token.exp = " + token.exp);
+        if (token.exp < currentTime) {
+          that.logger.info("token is expired, so reload this iframe");
+          refreshToken();
+          return;
+        }
+        var timeout = (token.exp - currentTime - 60) * 1000;
+        that.logger.info("set timer at 1 minutes ahead of expiration " + new Date(currentMills + timeout).toLocaleString());
+        setTimeout(refreshToken, timeout)
+      }
+      setTimer();
+    }catch (e) {
+      that.logger.error("Failed to start JWT refresh process", e)
+    }
+  }
+
 
   /**
    * @desc ユーザや動作環境を保持するコンテキストオブジェクトを取得する.
@@ -631,7 +699,7 @@ rnode.start()
     }
     option = option || {};
     this._normalizeHeader(option);
-    this._setAuthorizationHeader(option, this.userId, this.password);
+    this._setAuthorizationHeader(option);
 
     var urlObj = url.parse(href);
     var localService = null;
@@ -657,15 +725,19 @@ rnode.start()
     return localService.proxy.onReceive(req, res)
   }
 
-  _setAuthorizationHeader(option, userId, userPassword) {
-    if (option == null || this.userId == null || userPassword == null) {
+  _setAuthorizationHeader(option) {
+    if (option == null) {
       return;
     }
     var headers = option.headers;
     if (!headers) {
       headers = option.headers = {};
     }
-    headers['Authorization'] = 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64");
+    if (this.jwt != null) {
+      headers['Authorization'] = 'Bearer ' + this.jwt;
+    } else if (this.userId != null && this.password != null) {
+      headers['Authorization'] = 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64");
+    }
   }
 
   _normalizeHeader(option) {
