@@ -780,8 +780,11 @@ rnode.start()
     return Promise.resolve()
       .then(()=>{
         var webSocketPath = process.env.CNODE_WSOCKET_PATH || '/r';
+        var headerOpts = {};
+        this._setAuthorizationHeader(headerOpts);
         var socket = ioClient(this.coreNodeURL,{
-          path : webSocketPath
+          path : webSocketPath,
+          extraHeaders : headerOpts.headers
         });
         //ResourceNode distinguishes connection-status from resource-node-startup-status.
         socket.on('connect', ()=>{
