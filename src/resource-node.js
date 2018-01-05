@@ -681,9 +681,11 @@ rnode.start()
 
   _startServiceClasses() {
     return Promise.resolve()
-      .then(()=>this.serviceInstances.reduce((prev, current)=>{
-        return prev.then(()=>current.instance.start(this))
-      }, Promise.resolve()))
+      .then(() => this.serviceInstances
+        .sort((a, b) => (a.instance.bootOrder ? a.instance.bootOrder : 99999) - (b.instance.bootOrder ? b.instance.bootOrder : 99999))
+        .reduce((prev, current) => {
+          return prev.then(() => current.instance.start(this))
+        }, Promise.resolve()))
   }
 
   _fetch(path, option) {
