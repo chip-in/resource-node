@@ -329,24 +329,28 @@ rnode.start()
           keepalive: 30,
           wsOptions
         });
+        var subscribed = false;
         client.on("connect", (connack) => {
-          client.subscribe(topicName, {qos: 1}, (e, g) => {
-            this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
-            if (!responded) {
-              responded = true;
-              resolve(key);
-            }
-          })
-          client.on("message", (topic, message, packet) => {
-            subscriber.onReceive(message);
-          });
-          client.on("error", (e)=>{
-            this.logger.info("Failed to subscribe", e);
-            if (!responded) {
-              responded = true;
-              reject(e)
-            }
-          })
+          if (!subscribed) {
+            client.subscribe(topicName, {qos: 1}, (e, g) => {
+              subscribed = true;
+              this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+              if (!responded) {
+                responded = true;
+                resolve(key);
+              }
+            })
+            client.on("message", (topic, message, packet) => {
+              subscriber.onReceive(message);
+            });
+            client.on("error", (e)=>{
+              this.logger.info("Failed to subscribe", e);
+              if (!responded) {
+                responded = true;
+                reject(e)
+              }
+            })
+          }
         });
         this.mqttConnections[key] = {
           client, topicName
