@@ -102,6 +102,10 @@ class ResourceNode {
     this.listeners = {}
 
     this.listenerMap = {};
+
+    this.mountIdMap = {};
+
+    this.mountListenerMap = {};
   }
 
   /**
@@ -244,6 +248,11 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    * @param {string} mode モード. "singletonMaster"(Master/Slave による冗長構成), 
    * "loadBalancing"(複数のノードによる負荷分散), "localOnly"(ノード内専用のサービス) のいずれか
    * @param {Proxy} proxy Proxyオブジェクト
+   * @param {object} option：
+         remount : 切断から再接続した後で自動でリマウントするフラグ（default: true）
+         onDisconnect: 切断時コールバック
+         onReconnect: 再接続時コールバック
+         onRemount: リマウント時コールバック
    * @return {Promise<string>} 登録後または失敗後に状態遷移するPromiseオブジェクト。成功時には マウントハンドルとして使用する文字列が返る。このハンドルは、unmount時に必要となる。
    * @example 
    * 
@@ -289,14 +298,14 @@ rnode.start()
 
    *
    */
-  mount(path, mode, proxy) {
+  mount(path, mode, proxy, option) {
     if (mode !== "singletonMaster" && mode !== "loadBalancing" && mode !== "localOnly") {
       this.logger.error("Unknown mode is specified(%s)", mode);
       return Promise.reject(new Error("Unknown mode is specified"));
     }
     return Promise.resolve()
       .then(()=>this._ensureConnected())
-      .then(()=> this._mount(path, mode, proxy));
+      .then(()=> this._mount(path, mode, proxy, option || {}));
   }
 
   /**
@@ -1017,9 +1026,9 @@ rnode.start()
       })
   }
   
-  _mount(path, mode, proxy) {
+  _mount(path, mode, proxy, option, internal) {
     if (mode === "localOnly") {
-      return this._localMount(path, mode, proxy);
+      return this._localMount(path, mode, proxy, option);
     }
     var key = uuidv4();
     return Promise.resolve()
@@ -1049,9 +1058,51 @@ rnode.start()
         this.logger.info("Succeeded to mount:%s, %s, %s", path, mode, mountId);
         this.proxies[mountId] = proxy;
         return mountId;
-    });
+    })
+    .then((mountId)=>{
+      if (internal) {
+        return mountId;
+      }
+      this.mountIdMap[mountId] = mountId;
+      var addListener = (func, type) =>{
+        if (typeof func === "function") {
+          return this.addEventListener(type, ()=>{
+            this.logger.debug(type + " event:"+mountId);
+            try {
+              func(mountId);
+            } catch (e) {
+              this.logger.warn(type + " listener error", e);
+              //IGNORE
+            }
+          })
+        }
+      }
+      var disconnectId = addListener(option.onDisconnect, "disconnect");
+      var connectId = addListener(option.onReconnect, "connect");
+      var remountId = null;
+      if (option.remount == null || option.remount) {
+        remountId = addListener(()=>{
+          var prev = this.mountIdMap[mountId];
+          this._unmount(prev, true)
+          .then(()=>this._mount(path, mode, proxy, option, true))
+          .then((newMountId)=>{
+            this.mountIdMap[mountId] = newMountId;
+            if (option.onRemount) {
+              try {
+                option.onRemount(mountId);
+              } catch (e) {
+                this.logger.warn("remount callback error", e);
+                //IGNORE
+              }
+            }
+          })
+        }, "connect");
+      }      
+      this.mountListenerMap[mountId] = [disconnectId, connectId, remountId].filter((s)=>{return s != null;})
+      return mountId;
+    })
   }
-  _localMount(path, mode, proxy) {
+  _localMount(path, mode, proxy, option) {
     var handle = uuidv4();
     return Promise.resolve()
       .then(()=>{
@@ -1067,10 +1118,11 @@ rnode.start()
       })
   }
 
-  _unmount(handle) {
+  _unmount(handle, internal) {
     if (this.localProxyMap[handle] != null) {
         return this._localUnmount(handle);
     }
+    var realHandle = internal? handle : this.mountIdMap[handle];
     var key = uuidv4();
     return Promise.resolve()
       .then(()=>this._ask({
@@ -1078,7 +1130,7 @@ rnode.start()
         s : "ProxyService",
         t : "unmount",
         m : {
-          mountId : handle
+          mountId : realHandle
         }
       }))
       .then((resp) => {
@@ -1090,9 +1142,21 @@ rnode.start()
           this.logger.error("Failed to unmount. Received unexpected result code:%s", JSON.stringify(resp));
           throw new Error("Failed to unmount. Received unexpected result code");
         }
-        this.logger.info("Succeeded to unmount:%s", handle);
-        delete this.proxies[handle];
-    });
+        this.logger.info("Succeeded to unmount:%s", handle + "(" + realHandle + ")");
+        delete this.proxies[realHandle];
+    })
+    .then(()=>{
+      if (internal) {
+        return ;
+      }
+      var ids = this.mountListenerMap[handle] 
+      if (ids) {
+        ids.map((i)=>this.removeEventListener(i));
+      }
+      delete this.mountListenerMap[handle] ;
+      delete this.mountIdMap[handle] ;
+      
+    })
   }
   
   _localUnmount(handle) {
