@@ -98,6 +98,10 @@ class ResourceNode {
     this.identity = {};
 
     this.deviceContextName = this.contextNamespace + "dev";
+
+    this.listeners = {}
+
+    this.listenerMap = {};
   }
 
   /**
@@ -546,6 +550,53 @@ rnode.start()
       .then(()=>this._initContext())
   }
 
+  /**
+   * @desc イベントリスナを登録する
+   * @param {string} type  "disconnect"（コアノードとのWebSocket接続断。MQTT は対象外）, "connect"（コアノードとのWebSocket接続。MQTT は対象外） のみ対応  
+   * @param {function} listener listener 通知リスナ
+   * @return {string} リスナ解除時に指定するID
+   */
+  addEventListener(type, listener) {
+    if (!type || typeof type !== "string") {
+      throw new Error("type is not specified")
+    }
+    var listenerId = uuidv4();
+    var listenerDef = {
+      listenerId,
+      listener,
+      type
+    };
+    this.listeners[listenerId] = listenerDef
+    this.listenerMap[type] = this.listenerMap[type] || [];
+    this.listenerMap[type].push(listenerDef);
+    this.logger.info("add eventListener:" + type + ":" + listenerId);
+    return listenerId;
+  }
+
+  /**
+   * リスナを解除する
+   * @param {string} listenerId 登録時のID
+   */
+  removeEventListener(listenerId) {
+    if (!listenerId) {
+      return;
+    }
+    var listenerDef =  this.listeners[listenerId];
+    if (!listenerDef) {
+      return;
+    }
+    delete this.listeners[listenerId];
+    var ret = [];
+    for (var i = 0; i < this.listenerMap[listenerDef.type].length; i++) {
+      var l = this.listenerMap[listenerDef.type][i];
+      if (l.listenerId !== listenerId) {
+        ret.push(l);
+      }
+    }
+    this.listenerMap[listenerDef.type] = ret;
+    this.logger.info("remove eventListener:" + listenerDef.type + ":" + listenerId);
+  }
+
   _initContext() {
     var ret = {};
     return Promise.resolve()
@@ -799,12 +850,20 @@ rnode.start()
           this._register()
             .then(()=>{
               this.isConnected = true;
-              this._notifyConnected();
+              this._notifyConnected()
+              .then(()=>{
+                if (this.listenerMap["connect"]) {
+                  this.listenerMap["connect"].map((l)=>l.listener())
+                }
+              })
             })
         });
         socket.on('disconnect', ()=>{
           this.logger.warn("disconnected to core-node via websocket");
           this.isConnected = false;
+          if (this.listenerMap["disconnect"]) {
+            this.listenerMap["disconnect"].map((l)=>l.listener())
+          }
         });
         socket.on(this.webSocketMsgName, (msg) =>{
           this._receive(msg);
@@ -813,6 +872,7 @@ rnode.start()
         this.socket = socket;
       });
   }
+
   _register() {
     return Promise.resolve()
       .then(()=>{
