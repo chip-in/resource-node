@@ -1,5 +1,14 @@
 import util from 'util';
 
+var pmap = {
+  "DEBUG" : 10,
+  "INFO" : 20,
+  "WARN" : 30,
+  "ERROR" : 40
+}
+
+var priority = pmap[process.env.CNODE_LOG_LEVEL] || pmap["INFO"];
+
 var logging = function() {
   var msgs = [new Date().toISOString()
     ,(arguments[0] + "   ").substr(0, 5)
@@ -17,6 +26,10 @@ class Logger {
     this.category = category || "";
   }
   
+  _isEnabled(level) {
+    var p = pmap[level] || 0;
+    return p >= priority;
+  }
   /**
    * @desc デバッグレベルログを出力する
    * @param  msg 0 個以上の置換文字列 (substitution strings)を含む JavaScript 文字列
@@ -24,7 +37,8 @@ class Logger {
    *
    */
   debug(msg, substN) {
-    logging.apply(null, ["DEBUG", this.category].concat(Array.prototype.slice.call(arguments)));
+    var level = "DEBUG";
+    if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -34,7 +48,8 @@ class Logger {
    *
    */
   info(msg, substN) {
-    logging.apply(null, ["INFO", this.category].concat(Array.prototype.slice.call(arguments)));
+    var level = "INFO";
+    if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -44,7 +59,8 @@ class Logger {
    *
    */
   warn(msg, substN) {
-    logging.apply(null, ["WARN", this.category].concat(Array.prototype.slice.call(arguments)));
+    var level = "WARN";
+    if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
   /**
@@ -54,7 +70,8 @@ class Logger {
    *
    */
   error(msg, substN) {
-    logging.apply(null, ["ERROR", this.category].concat(Array.prototype.slice.call(arguments)));
+    var level = "ERROR";
+    if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
 
 }
