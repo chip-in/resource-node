@@ -30,13 +30,13 @@
   },
   "dependencies": {
     "cookie-parser": "^1.4.3",
-    "into-stream": "^3.1.0",
     "mongo-parse": "^2.0.3",
     "morgan": "^1.9.0",
     "mqtt": "^2.15.0",
     "node-fetch": "^1.7.3",
     "nunjucks": "^3.0.1",
     "socket.io-client": "^2.0.3",
+    "string-to-stream": "^1.1.0",
     "uuid": "^3.1.0",
     "yamljs": "^0.3.0"
   },

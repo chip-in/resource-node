@@ -1,5 +1,5 @@
 import EventEmitter from 'events'
-import intoStream from 'into-stream'
+import toStream from 'string-to-stream'
 
 var isRawFormat = (body) => {
   if (body == null) {
@@ -27,7 +27,7 @@ export default class WSRequest {
     } else if (this.body != null && Object.keys(this.body).length !== 0) {
       input = JSON.stringify(this.body)
     }
-    this.stream = intoStream(input);
+    this.stream = toStream(input);
     this.stream.on("close", ()=>{
       if (this.timeoutId) {
         clearTimeout(timeoutId);
