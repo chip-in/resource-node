@@ -6,14 +6,6 @@ export default class WSResponse {
     this.msg = msg;
     this.req = req;
     this.cookies = []
-    if (msg.cookies) {
-      for (var k in msg.cookies) {
-        msg.cookies.push({
-          name: k,
-          value: msg.cookies[k]
-        });
-      }
-    }
     this.headers = {};
     this.statusCode = 200;
     this.answered = false;
