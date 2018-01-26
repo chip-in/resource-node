@@ -6,14 +6,13 @@ import url from 'url';
 import WSResponse from './conversion/ws-response';
 import WSRequest from './conversion/ws-request';
 import mqtt from 'mqtt';
-import fetch from 'node-fetch';
-import {Headers} from 'node-fetch';
 import parser from 'mongo-parse';
 import DirectoryService from './util/directory-service';
 import querystring from 'querystring';
 import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
 import ConfigLoader from './util/config-loader';
+import {fetchImpl, fetchOption} from './util/fetch';
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -494,7 +493,7 @@ rnode.start()
       var refreshToken = function refreshToken() {
         var option = {mode: 'cors'};
         that._setAuthorizationHeader(option);
-        fetch(url, option)
+        fetchImpl(url, option)
           .then(function(response) {
             if (response.status == 401) {
               return Promise.reject("invalid session");
@@ -763,7 +762,7 @@ rnode.start()
                 path.indexOf("https://") !== 0) {
         return Promise.reject("Invalid url is specified:%s", path);
     }
-    option = option || {};
+    option = Object.assign({}, fetchOption, option);
     this._normalizeHeader(option);
     this._setAuthorizationHeader(option);
 
@@ -773,7 +772,7 @@ rnode.start()
       (localService = this.proxyDirService.lookup(urlObj.path)) != null) {
         return this._localFetch(path, option, localService);
     }
-    return fetch(href, option);
+    return fetchImpl(href, option);
    
   }
 
@@ -816,7 +815,7 @@ rnode.start()
     }
     var tmp = {};
     //convert to native object
-    if (headers instanceof Headers) {
+    if (typeof headers.getAll === "function") {
       tmp = {};
       for (var k in Object.keys(headers)) {
         var val = headers.getAll(k);

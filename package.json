@@ -38,6 +38,7 @@
     "socket.io-client": "^2.0.3",
     "string-to-stream": "^1.1.0",
     "uuid": "^3.1.0",
+    "whatwg-fetch": "^2.0.3",
     "yamljs": "^0.3.0"
   },
   "publishConfig": {
