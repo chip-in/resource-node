@@ -428,10 +428,11 @@ rnode.start()
     .then(()=>{
       return new Promise((resolve, reject)=>{
         var mqttUrl = this._createMQTTUrl();
+        var wsOptions = {}
+        this._setAuthorizationHeader(wsOptions);
         var client = mqtt.connect(mqttUrl, {
           keepalive : 30,
-          username : this.userId,
-          password : this.password
+          wsOptions
         });
         client.on("connect", ()=>{
           client.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
