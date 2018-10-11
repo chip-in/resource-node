@@ -2,7 +2,17 @@ import { ResourceNode, ServiceEngine, Proxy, Subscriber } from '../../..';
 
 process.on('unhandledRejection', console.dir);
 
-var coreNodeUrl = "http://test-core.chip-in.net:80";
+if (process.argv.length < 3) {
+  console.log("Usage: npm start -- " +
+              "<core_node_url(e.g. 'http://test-core.chip-in.net')> "+
+              "[<node_class>] ")
+  process.exit(0);
+}
+var coreNodeUrl = process.argv[2];
+var nodeClass =  process.argv[3] || "db-server";
+
+var jwtToken = process.env.ACCESS_TOKEN;
+var jwtRefreshPath = process.env.TOKEN_UPDATE_PATH;
 
 class RestConnector extends ServiceEngine { }
 class DatabaseRegistry extends ServiceEngine { }
@@ -15,7 +25,10 @@ class SubscriberImpl extends Subscriber {
     rnode.logger.info("Receive MQTT message:", msg.toString());
   }
 }
-var rnode = new ResourceNode(coreNodeUrl, "db-server");
+var rnode = new ResourceNode(coreNodeUrl, nodeClass);
+if (jwtToken) {
+  rnode.setJWTAuthorization(jwtToken, jwtRefreshPath);
+}
 rnode.registerServiceClasses({
   RestConnector,
   DatabaseRegistry,
