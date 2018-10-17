@@ -48,6 +48,8 @@ class ResourceNode {
      */
     this.nodeClassName = nodeClassName;
 
+    this.nodeClassConfig = {};
+
     this.userId = null;
 
     this.password = null;
@@ -94,9 +96,7 @@ class ResourceNode {
 
     this.geoLocationEnableHighAccuracy = false;
 
-    this.identity = {};
-
-    this.deviceContextName = this.contextNamespace + "dev";
+    this.userInfo = {};
 
     this.listeners = {}
 
@@ -609,24 +609,43 @@ rnode.start()
   _initContext() {
     var ret = {};
     return Promise.resolve()
+      .then(()=>this._initContextBySession(ret))
       .then(()=>this._initContextByJWT(ret))
       .then(()=>this._initContextByDevice(ret))
+      .then(()=>this._initContextByConfig(ret))
       .then(()=>this._initContextByGeoLocation(ret))
       .then(()=>this._initContextByEnv(ret))
       .then(()=>this._initContextByLocalStorage(ret))
       .then(()=>this.ctx=ret)
   }
 
+  _initContextBySession(ret) {
+    return Promise.resolve()
+    .then(()=>Object.assign(ret, this.userInfo.session))
+  }
+
   _initContextByJWT(ret) {
     return Promise.resolve()
-    .then(()=>Object.assign(ret, this.identity.token))
+    .then(()=>Object.assign(ret, {
+      "net.chip-in.uid" : this.userInfo.token && this.userInfo.token.sub
+    }))
+    .then(()=>Object.assign(ret, this.userInfo.token))
   }
 
   _initContextByDevice(ret) {
     return Promise.resolve()
-    .then(()=>ret[this.deviceContextName] = this.identity.device)
+    .then(()=>ret[this.contextNamespace + "dev"] = this.userInfo.device)/* XXX for compatibility */
+    .then(()=>Object.assign(ret, this.userInfo.devinfo))
   }
-
+  
+  _initContextByConfig(ret) {
+    return Promise.resolve()
+    .then(()=>Object.assign(ret, {
+      "net.chip-in.node-class" : this.nodeClassName,
+      "net.chip-in.node-class-config" : this.nodeClassConfig
+    }))
+  }
+  
   _initContextByGeoLocation(ret) {
     return Promise.resolve()
     .then(()=>{
@@ -718,6 +737,10 @@ rnode.start()
   _searchNodeClass(nodeClassName) {
     return Promise.resolve()
       .then(()=>new ConfigLoader(this).load(nodeClassName))
+      .then((conf)=>{
+        this.nodeClassConfig = conf;
+        return conf;
+      })
   }
 
   _createServiceClassInstance(conf) {
@@ -904,7 +927,7 @@ rnode.start()
           }
           this.logger.info("Succeeded to register cluster");
           this.nodeId = uuid;
-          this.identity = resp.u || {};
+          this.userInfo = resp.u || {};
         });
     });
   }
