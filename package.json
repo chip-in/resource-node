@@ -29,6 +29,7 @@
     "jsdoc-baseline": "https://github.com/hegemonic/baseline/archive/c492ee1717f434fdb90a8a6467dd8e95b30d8957.tar.gz"
   },
   "dependencies": {
+    "cookie": "^0.3.1",
     "cookie-parser": "^1.4.3",
     "mongo-parse": "^2.0.3",
     "mqtt": "^2.15.0",

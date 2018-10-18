@@ -13,6 +13,13 @@ import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
 import ConfigLoader from './util/config-loader';
 import {fetchImpl, fetchOption} from './util/fetch';
+import cookie from 'cookie';
+
+const COOKIE_NAME_TOKEN = "access_token";
+
+var decodeJwt = function (jwt) {
+  return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+}
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -335,12 +342,8 @@ rnode.start()
       return new Promise((resolve, reject) => {
         var responded = false;
         var mqttUrl = this._createMQTTUrl();
-        var wsOptions = {}
-        this._setAuthorizationHeader(wsOptions);
-        var client = mqtt.connect(mqttUrl, {
-          keepalive: 30,
-          wsOptions
-        });
+        var mqttConnectOption = this._createMQTTConnectOption();
+        var client = mqtt.connect(mqttUrl, mqttConnectOption);
         var subscribed = false;
         client.on("connect", (connack) => {
           if (!subscribed) {
@@ -428,12 +431,8 @@ rnode.start()
     .then(()=>{
       return new Promise((resolve, reject)=>{
         var mqttUrl = this._createMQTTUrl();
-        var wsOptions = {}
-        this._setAuthorizationHeader(wsOptions);
-        var client = mqtt.connect(mqttUrl, {
-          keepalive : 30,
-          wsOptions
-        });
+        var mqttConnectOption = this._createMQTTConnectOption();
+        var client = mqtt.connect(mqttUrl, mqttConnectOption);
         client.on("connect", ()=>{
           client.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
             client.end();
@@ -488,9 +487,6 @@ rnode.start()
     var url = this.coreNodeURL + path;
     try {
       var that = this;
-      var decodeJwt = function (jwt) {
-        return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
-      }
       var refreshToken = function refreshToken() {
         var option = {mode: 'cors'};
         that._setAuthorizationHeader(option);
@@ -814,6 +810,34 @@ rnode.start()
     return localService.proxy.onReceive(req, res)
   }
 
+  _createMQTTConnectOption() {
+    var wsOptions = {}
+    this._setAuthorizationHeader(wsOptions);
+
+    var token = this.jwt;
+    if (token == null) {
+      var cookies = document && document.cookie && cookie.parse(document.cookie);
+      if (cookies && cookies[COOKIE_NAME_TOKEN]) {
+        token = cookies[COOKIE_NAME_TOKEN];
+      }
+    }
+    var ret = {
+      keepalive: 30,
+      wsOptions
+    };
+
+    if (token == null) {
+      return ret;
+    }
+    try {
+      ret.username = decodeJwt(token).sub;
+      ret.password = token;
+    } catch (e) {
+      this.logger.warn("Failed to parse jwt token", e);
+    }
+    return ret;
+    
+  }
   _setAuthorizationHeader(option) {
     if (option == null) {
       return;
