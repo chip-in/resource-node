@@ -137,8 +137,9 @@ node.start()
     return Promise.resolve()
       .then(()=>this._tryToJoinCluster())
       .then(()=>this._ensureConnected())
+      .then(()=>this._initConnectionContext())
       .then(()=>this._enableServices())
-      .then(()=>this._initContext())
+      .then(()=>this._initApplicationContext())
       .then(()=>this.started = true)
       .catch((e)=>{
         this.logger.error("Failed to start resource-node", e);
@@ -552,7 +553,8 @@ rnode.start()
         localStorage.setItem(name, value);
       })
       //refresh
-      .then(()=>this._initContext())
+      .then(()=>this._initConnectionContext())
+      .then(()=>this._initApplicationContext())
   }
 
   /**
@@ -602,16 +604,24 @@ rnode.start()
     this.logger.info("remove eventListener:" + listenerDef.type + ":" + listenerId);
   }
 
-  _initContext() {
+  _initConnectionContext() {
     var ret = {};
     return Promise.resolve()
       .then(()=>this._initContextBySession(ret))
       .then(()=>this._initContextByJWT(ret))
       .then(()=>this._initContextByDevice(ret))
-      .then(()=>this._initContextByConfig(ret))
       .then(()=>this._initContextByGeoLocation(ret))
-      .then(()=>this._initContextByEnv(ret))
-      .then(()=>this._initContextByLocalStorage(ret))
+      .then(()=>this._initContextByEnv(ret)) /* overwrite */
+      .then(()=>this._initContextByLocalStorage(ret)) /* overwrite */
+      .then(()=>this.ctx=ret)
+  }
+
+  _initApplicationContext() {
+    var ret = this.ctx || {};
+    return Promise.resolve()
+      .then(()=>this._initContextByConfig(ret))
+      .then(()=>this._initContextByEnv(ret)) /* overwrite */
+      .then(()=>this._initContextByLocalStorage(ret)) /* overwrite */
       .then(()=>this.ctx=ret)
   }
 
