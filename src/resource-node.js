@@ -840,7 +840,7 @@ rnode.start()
       return ret;
     }
     try {
-      ret.username = decodeJwt(token).sub;
+      ret.username = token;
       ret.password = token;
     } catch (e) {
       this.logger.warn("Failed to parse jwt token", e);
