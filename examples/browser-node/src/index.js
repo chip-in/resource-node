@@ -79,6 +79,9 @@ var execMount = function() {
       mountIdMap[param].push(mountId);
       writeMountResult("Succeeded to mount path:" + param + "," + param2);
     })
+    .catch((e)=>{
+      writeMountResult("Failed to mount :" + e.message);
+    })
   } else if (op === "unmount") {
     var target = mountIdMap[param];
     if (target == null || target.length === 0) {
