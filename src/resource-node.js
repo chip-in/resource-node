@@ -826,9 +826,13 @@ rnode.start()
 
     var token = this.jwt;
     if (token == null) {
-      var cookies = document && document.cookie && cookie.parse(document.cookie);
-      if (cookies && cookies[COOKIE_NAME_TOKEN]) {
-        token = cookies[COOKIE_NAME_TOKEN];
+      try {
+        var cookies = document && document.cookie && cookie.parse(document.cookie);
+        if (cookies && cookies[COOKIE_NAME_TOKEN]) {
+          token = cookies[COOKIE_NAME_TOKEN];
+        }
+      } catch (e) {
+        //IGNORE
       }
     }
     var ret = {
@@ -839,12 +843,7 @@ rnode.start()
     if (token == null) {
       return ret;
     }
-    try {
-      ret.username = token;
-      ret.password = token;
-    } catch (e) {
-      this.logger.warn("Failed to parse jwt token", e);
-    }
+    ret.username = token;
     return ret;
     
   }
