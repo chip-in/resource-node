@@ -83,8 +83,6 @@ class ResourceNode {
 
     this.mqttConnections = {};
 
-    this.mqttClientConnections = {};
-
     this.sessionTable = {};
 
     this.proxyDirService = new DirectoryService();
@@ -112,6 +110,8 @@ class ResourceNode {
     this.mountIdMap = {};
 
     this.mountListenerMap = {};
+
+    this.keepMqttPubConn = process.env.KEEP_MQTT_PUB_CONN || true;
   }
 
   /**
@@ -426,18 +426,16 @@ rnode.start()
    *
    */
   publish(topicName, message) {
-    var key = uuidv4();
     return Promise.resolve()
     .then(()=>this._ensureConnected())
     .then(()=>{
       return new Promise((resolve, reject)=>{
-        var mqttUrl = this._createMQTTUrl();
-        var mqttConnectOption = this._createMQTTConnectOption();
-        var client = mqtt.connect(mqttUrl, mqttConnectOption);
-        client.on("connect", ()=>{
-          client.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
-            client.end();
-            delete this.mqttClientConnections[key];
+        this._ensureMQTTPublishConnection()
+        .then((conn)=>{
+          conn.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
+            if (!this.keepMqttPubConn) {
+              conn.end();
+            }
             if (e) {
               this.logger.error("Failed to publish(%s)", topicName, e);
               reject(e);
@@ -446,17 +444,33 @@ rnode.start()
             this.logger.info("Succeeded to publish(%s)", topicName)
             resolve();
           })
-        }); 
-        client.on("error", (e) => {
-          delete this.mqttClientConnections[key];
-          this.logger.info("Failed to publish", e);
-          reject(e);
         })
-        this.mqttClientConnections[key] = client;
       });
     })
   }
-
+  _ensureMQTTPublishConnection() {
+    var mqttUrl = this._createMQTTUrl();
+    var mqttConnectOption = this._createMQTTConnectOption();
+    return Promise.resolve()
+    .then(()=>{
+      if (this.mqttPubConn) {
+        return this.mqttPubConn;
+      }
+      return new Promise((resolve, reject)=>{
+        var conn = mqtt.connect(mqttUrl, mqttConnectOption);
+        conn.on("connect", ()=>{
+          if (this.keepMqttPubConn) {
+            this.mqttPubConn = conn;
+          }
+          resolve(conn);
+        }); 
+        conn.on("error", (e) => {
+          this.logger.error("mqtt error detected", e);
+          reject(e);
+        })
+      })
+    })
+  }
   /**
    * コアノード接続時のBASIC認証情報を設定する。
    * 
@@ -1076,8 +1090,9 @@ rnode.start()
         })
       })
       .then(()=>{
-        for (var k in this.mqttClientConnections) {
-          this.mqttClientConnections[k].end();
+        if (this.mqttPubConn != null) {
+          this.mqttPubConn.end();
+          this.mqttPubConn = null;
         }
       })
   }
