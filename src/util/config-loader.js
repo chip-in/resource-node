@@ -113,6 +113,8 @@ export default class ConfigLoader {
     env.opts.autoescape = false;
     env.addExtension('CINodeConfig', new CINodeConfigParser(this.rnode));
     env.addGlobal("ciContext", this.rnode.getContext());
+    env.addGlobal("JSON", JSON);
+    env.addGlobal("YAML", YAML);
     return env;
   }
 }
