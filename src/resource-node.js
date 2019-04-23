@@ -930,7 +930,7 @@ rnode.start()
         var socket = ioClient(this.coreNodeURL,{
           path : webSocketPath,
           extraHeaders : headerOpts.headers,
-          zlibDeflateOptions
+          perMessageDeflate
         });
         //ResourceNode distinguishes connection-status from resource-node-startup-status.
         socket.on('connect', ()=>{
