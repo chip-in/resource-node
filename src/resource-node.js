@@ -1,24 +1,33 @@
 import Logger from './util/logger';
 import ioClient from 'socket.io-client';
 import uuidv4 from 'uuid/v4';
-import ServiceEngine from './api/service-engine';
 import url from 'url';
 import WSResponse from './conversion/ws-response';
 import WSRequest from './conversion/ws-request';
 import mqtt from 'mqtt';
 import parser from 'mongo-parse';
 import DirectoryService from './util/directory-service';
-import querystring from 'querystring';
 import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
 import ConfigLoader from './util/config-loader';
 import {fetchImpl, fetchOption} from './util/fetch';
 import cookie from 'cookie';
+import zlib from 'zlib';
 
 const COOKIE_NAME_TOKEN = "access_token";
 
 var decodeJwt = function (jwt) {
   return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+}
+
+const perMessageDeflate = {
+  zlibDeflateOptions : {
+    level:zlib.constants.Z_BEST_SPEED,
+    chunkSize : 1 * 1024 * 1024
+  },
+  zlibInflateOptions : {
+    chunkSize : 1 * 1024 * 1024
+  }
 }
 
 /**
@@ -920,7 +929,8 @@ rnode.start()
         this._setAuthorizationHeader(headerOpts);
         var socket = ioClient(this.coreNodeURL,{
           path : webSocketPath,
-          extraHeaders : headerOpts.headers
+          extraHeaders : headerOpts.headers,
+          zlibDeflateOptions
         });
         //ResourceNode distinguishes connection-status from resource-node-startup-status.
         socket.on('connect', ()=>{
