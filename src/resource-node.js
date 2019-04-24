@@ -22,7 +22,7 @@ var decodeJwt = function (jwt) {
 
 const perMessageDeflate = {
   zlibDeflateOptions : {
-    level:zlib.constants.Z_BEST_SPEED,
+    level: 1 /* zlib.constants.Z_BEST_SPEED */,
     chunkSize : 1 * 1024 * 1024
   },
   zlibInflateOptions : {
