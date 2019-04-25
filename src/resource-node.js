@@ -1020,7 +1020,9 @@ rnode.start()
             return;
           }
           var respMsg = Object.assign({}, msg);
-          respMsg.m = Object.assign({}, resp);
+          var copyResp = {};
+          WSResponse.copyTo(copyResp, resp);
+          respMsg.m = copyResp;
           respMsg.t = "response";
           this._send(respMsg);
           resolve();
