@@ -1,18 +1,34 @@
 import Logger from './util/logger';
 import ioClient from 'socket.io-client';
 import uuidv4 from 'uuid/v4';
-import ServiceEngine from './api/service-engine';
 import url from 'url';
 import WSResponse from './conversion/ws-response';
 import WSRequest from './conversion/ws-request';
 import mqtt from 'mqtt';
 import parser from 'mongo-parse';
 import DirectoryService from './util/directory-service';
-import querystring from 'querystring';
 import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
 import ConfigLoader from './util/config-loader';
 import {fetchImpl, fetchOption} from './util/fetch';
+import cookie from 'cookie';
+import zlib from 'zlib';
+
+const COOKIE_NAME_TOKEN = "access_token";
+
+var decodeJwt = function (jwt) {
+  return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+}
+
+const perMessageDeflate = {
+  zlibDeflateOptions : {
+    level: 1 /* zlib.constants.Z_BEST_SPEED */,
+    chunkSize : 1 * 1024 * 1024
+  },
+  zlibInflateOptions : {
+    chunkSize : 1 * 1024 * 1024
+  }
+}
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -48,6 +64,8 @@ class ResourceNode {
      */
     this.nodeClassName = nodeClassName;
 
+    this.nodeClassConfig = {};
+
     this.userId = null;
 
     this.password = null;
@@ -74,8 +92,6 @@ class ResourceNode {
 
     this.mqttConnections = {};
 
-    this.mqttClientConnections = {};
-
     this.sessionTable = {};
 
     this.proxyDirService = new DirectoryService();
@@ -94,9 +110,7 @@ class ResourceNode {
 
     this.geoLocationEnableHighAccuracy = false;
 
-    this.identity = {};
-
-    this.deviceContextName = this.contextNamespace + "dev";
+    this.userInfo = {};
 
     this.listeners = {}
 
@@ -105,6 +119,8 @@ class ResourceNode {
     this.mountIdMap = {};
 
     this.mountListenerMap = {};
+
+    this.keepMqttPubConn = process.env.KEEP_MQTT_PUB_CONN || true;
   }
 
   /**
@@ -130,8 +146,9 @@ node.start()
     return Promise.resolve()
       .then(()=>this._tryToJoinCluster())
       .then(()=>this._ensureConnected())
+      .then(()=>this._initConnectionContext())
       .then(()=>this._enableServices())
-      .then(()=>this._initContext())
+      .then(()=>this._initApplicationContext())
       .then(()=>this.started = true)
       .catch((e)=>{
         this.logger.error("Failed to start resource-node", e);
@@ -335,12 +352,8 @@ rnode.start()
       return new Promise((resolve, reject) => {
         var responded = false;
         var mqttUrl = this._createMQTTUrl();
-        var wsOptions = {}
-        this._setAuthorizationHeader(wsOptions);
-        var client = mqtt.connect(mqttUrl, {
-          keepalive: 30,
-          wsOptions
-        });
+        var mqttConnectOption = this._createMQTTConnectOption();
+        var client = mqtt.connect(mqttUrl, mqttConnectOption);
         var subscribed = false;
         client.on("connect", (connack) => {
           if (!subscribed) {
@@ -422,22 +435,16 @@ rnode.start()
    *
    */
   publish(topicName, message) {
-    var key = uuidv4();
     return Promise.resolve()
     .then(()=>this._ensureConnected())
     .then(()=>{
       return new Promise((resolve, reject)=>{
-        var mqttUrl = this._createMQTTUrl();
-        var wsOptions = {}
-        this._setAuthorizationHeader(wsOptions);
-        var client = mqtt.connect(mqttUrl, {
-          keepalive : 30,
-          wsOptions
-        });
-        client.on("connect", ()=>{
-          client.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
-            client.end();
-            delete this.mqttClientConnections[key];
+        this._ensureMQTTPublishConnection()
+        .then((conn)=>{
+          conn.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
+            if (!this.keepMqttPubConn) {
+              conn.end();
+            }
             if (e) {
               this.logger.error("Failed to publish(%s)", topicName, e);
               reject(e);
@@ -446,17 +453,33 @@ rnode.start()
             this.logger.info("Succeeded to publish(%s)", topicName)
             resolve();
           })
-        }); 
-        client.on("error", (e) => {
-          delete this.mqttClientConnections[key];
-          this.logger.info("Failed to publish", e);
-          reject(e);
         })
-        this.mqttClientConnections[key] = client;
       });
     })
   }
-
+  _ensureMQTTPublishConnection() {
+    var mqttUrl = this._createMQTTUrl();
+    var mqttConnectOption = this._createMQTTConnectOption();
+    return Promise.resolve()
+    .then(()=>{
+      if (this.mqttPubConn) {
+        return this.mqttPubConn;
+      }
+      return new Promise((resolve, reject)=>{
+        var conn = mqtt.connect(mqttUrl, mqttConnectOption);
+        conn.on("connect", ()=>{
+          if (this.keepMqttPubConn) {
+            this.mqttPubConn = conn;
+          }
+          resolve(conn);
+        }); 
+        conn.on("error", (e) => {
+          this.logger.error("mqtt error detected", e);
+          reject(e);
+        })
+      })
+    })
+  }
   /**
    * コアノード接続時のBASIC認証情報を設定する。
    * 
@@ -488,9 +511,6 @@ rnode.start()
     var url = this.coreNodeURL + path;
     try {
       var that = this;
-      var decodeJwt = function (jwt) {
-        return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
-      }
       var refreshToken = function refreshToken() {
         var option = {mode: 'cors'};
         that._setAuthorizationHeader(option);
@@ -556,7 +576,8 @@ rnode.start()
         localStorage.setItem(name, value);
       })
       //refresh
-      .then(()=>this._initContext())
+      .then(()=>this._initConnectionContext())
+      .then(()=>this._initApplicationContext())
   }
 
   /**
@@ -606,27 +627,54 @@ rnode.start()
     this.logger.info("remove eventListener:" + listenerDef.type + ":" + listenerId);
   }
 
-  _initContext() {
+  _initConnectionContext() {
     var ret = {};
     return Promise.resolve()
+      .then(()=>this._initContextBySession(ret))
       .then(()=>this._initContextByJWT(ret))
       .then(()=>this._initContextByDevice(ret))
       .then(()=>this._initContextByGeoLocation(ret))
-      .then(()=>this._initContextByEnv(ret))
-      .then(()=>this._initContextByLocalStorage(ret))
+      .then(()=>this._initContextByEnv(ret)) /* overwrite */
+      .then(()=>this._initContextByLocalStorage(ret)) /* overwrite */
       .then(()=>this.ctx=ret)
+  }
+
+  _initApplicationContext() {
+    var ret = this.ctx || {};
+    return Promise.resolve()
+      .then(()=>this._initContextByConfig(ret))
+      .then(()=>this._initContextByEnv(ret)) /* overwrite */
+      .then(()=>this._initContextByLocalStorage(ret)) /* overwrite */
+      .then(()=>this.ctx=ret)
+  }
+
+  _initContextBySession(ret) {
+    return Promise.resolve()
+    .then(()=>Object.assign(ret, this.userInfo.session))
   }
 
   _initContextByJWT(ret) {
     return Promise.resolve()
-    .then(()=>Object.assign(ret, this.identity.token))
+    .then(()=>Object.assign(ret, {
+      "net.chip-in.uid" : this.userInfo.token && this.userInfo.token.sub
+    }))
+    .then(()=>Object.assign(ret, this.userInfo.token))
   }
 
   _initContextByDevice(ret) {
     return Promise.resolve()
-    .then(()=>ret[this.deviceContextName] = this.identity.device)
+    .then(()=>ret[this.contextNamespace + "dev"] = this.userInfo.device)/* XXX for compatibility */
+    .then(()=>Object.assign(ret, this.userInfo.devinfo))
   }
-
+  
+  _initContextByConfig(ret) {
+    return Promise.resolve()
+    .then(()=>Object.assign(ret, {
+      "net.chip-in.node-class" : this.nodeClassName,
+      "net.chip-in.node-class-config" : this.nodeClassConfig
+    }))
+  }
+  
   _initContextByGeoLocation(ret) {
     return Promise.resolve()
     .then(()=>{
@@ -718,6 +766,10 @@ rnode.start()
   _searchNodeClass(nodeClassName) {
     return Promise.resolve()
       .then(()=>new ConfigLoader(this).load(nodeClassName))
+      .then((conf)=>{
+        this.nodeClassConfig = conf;
+        return conf;
+      })
   }
 
   _createServiceClassInstance(conf) {
@@ -791,6 +843,33 @@ rnode.start()
     return localService.proxy.onReceive(req, res)
   }
 
+  _createMQTTConnectOption() {
+    var wsOptions = {}
+    this._setAuthorizationHeader(wsOptions);
+
+    var token = this.jwt;
+    if (token == null) {
+      try {
+        var cookies = document && document.cookie && cookie.parse(document.cookie);
+        if (cookies && cookies[COOKIE_NAME_TOKEN]) {
+          token = cookies[COOKIE_NAME_TOKEN];
+        }
+      } catch (e) {
+        //IGNORE
+      }
+    }
+    var ret = {
+      keepalive: 30,
+      wsOptions
+    };
+
+    if (token == null) {
+      return ret;
+    }
+    ret.username = token;
+    return ret;
+    
+  }
   _setAuthorizationHeader(option) {
     if (option == null) {
       return;
@@ -850,7 +929,8 @@ rnode.start()
         this._setAuthorizationHeader(headerOpts);
         var socket = ioClient(this.coreNodeURL,{
           path : webSocketPath,
-          extraHeaders : headerOpts.headers
+          extraHeaders : headerOpts.headers,
+          perMessageDeflate
         });
         //ResourceNode distinguishes connection-status from resource-node-startup-status.
         socket.on('connect', ()=>{
@@ -904,7 +984,7 @@ rnode.start()
           }
           this.logger.info("Succeeded to register cluster");
           this.nodeId = uuid;
-          this.identity = resp.u || {};
+          this.userInfo = resp.u || {};
         });
     });
   }
@@ -940,7 +1020,9 @@ rnode.start()
             return;
           }
           var respMsg = Object.assign({}, msg);
-          respMsg.m = Object.assign({}, resp);
+          var copyResp = {};
+          WSResponse.copyTo(copyResp, resp);
+          respMsg.m = copyResp;
           respMsg.t = "response";
           this._send(respMsg);
           resolve();
@@ -1020,8 +1102,9 @@ rnode.start()
         })
       })
       .then(()=>{
-        for (var k in this.mqttClientConnections) {
-          this.mqttClientConnections[k].end();
+        if (this.mqttPubConn != null) {
+          this.mqttPubConn.end();
+          this.mqttPubConn = null;
         }
       })
   }

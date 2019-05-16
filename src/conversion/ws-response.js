@@ -10,6 +10,13 @@ export default class WSResponse {
     this.statusCode = 200;
     this.answered = false;
   }
+  static copyTo(dst, from) {
+    Object.assign(dst, from);
+    const ignorable = ["msg", "req", "answered", "timeoutId"]
+    for (var i = 0; i < ignorable.length; i++) {
+      delete dst[ignorable[i]];
+    }
+  }
   append(field, value) {
     this.headers[field] = this.headers[field] || [];
     this.headers[field].push(value);

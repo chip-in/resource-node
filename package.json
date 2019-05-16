@@ -1,6 +1,6 @@
 {
   "name": "@chip-in/resource-node",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "chip-in ResourceNode",
   "keywords": [
     "chip-in"
@@ -29,12 +29,13 @@
     "jsdoc-baseline": "https://github.com/hegemonic/baseline/archive/c492ee1717f434fdb90a8a6467dd8e95b30d8957.tar.gz"
   },
   "dependencies": {
+    "cookie": "^0.3.1",
     "cookie-parser": "^1.4.3",
     "mongo-parse": "^2.0.3",
-    "mqtt": "^2.15.0",
+    "mqtt": "^2.18.8",
     "node-fetch": "^1.7.3",
-    "nunjucks": "^3.1.3",
-    "socket.io-client": "^2.1.1",
+    "nunjucks": "3.1.7",
+    "socket.io-client": "^2.2.0",
     "string-to-stream": "^1.1.0",
     "uuid": "^3.1.0",
     "whatwg-fetch": "^2.0.3",

@@ -1,10 +1,12 @@
 const path = require('path');
-var CORE_NODE_URL = "http://test-core.chip-in.net"
+var CORE_NODE_URL = "http://core"
 module.exports = {
-  entry: './src/index.js',
+  context: __dirname + '/src',
+  entry: './index.js',
   output: {
-    filename: 'bundle.js',
-    path: path.resolve(__dirname, './public/dist')
+    filename: 'dist/bundle.js',
+    path: __dirname + '/public/',
+    publicPath : ""
   },
   node: {
     fs: 'empty'
