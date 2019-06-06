@@ -538,15 +538,16 @@ rnode.start()
               throw reason;
             });
         }
+        var now = Math.round(new Date().getTime() / 1000)
 
         var setTimer = function setTimer(jwt) {
           var token = decodeJwt(jwt);
+          now = Math.round(new Date().getTime() / 1000)
           that.logger.info("current time = " + now + " token.exp = " + token.exp);
           var timeout = (token.exp - now - 60) * 1000;
           that.tokenTimerId = setTimeout(refreshToken, timeout > minRefreshInterval ? timeout : minRefreshInterval);
         }
 
-        var now = Math.round(new Date().getTime() / 1000)
         if (decodeJwt(this.jwt).exp < now) {
           that.logger.info("token is expired, so reload now");
           return Promise.resolve()
