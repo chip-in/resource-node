@@ -494,60 +494,72 @@ rnode.start()
   setJWTAuthorization(jwt, updatePath ) {
     this.jwt = jwt;
     this.jwtUpdatepath = updatePath;
-    this._startJWTRefreshProcess();
   }
   _startJWTRefreshProcess() {
-    if (this.jwt == null) {
-      return;
-    }
-    if (this.isRefreshRunning) {
-      return;
-    }
-    this.isRefreshRunning = true;
-    var path = this.jwtUpdatepath || "/core.JWTUpdate"
-    if (path.indexOf("/") !== 0) {
-      path = "/" + path;
-    }
-    var url = this.coreNodeURL + path;
-    try {
-      var that = this;
-      var refreshToken = function refreshToken() {
-        var option = {mode: 'cors'};
-        that._setAuthorizationHeader(option);
-        fetchImpl(url, option)
-          .then(function(response) {
-            if (response.status == 401) {
-              return Promise.reject("invalid session");
-            } else if (! response.ok) {
-              return Promise.reject("Failed to refresh token" +  response.statusText);
-            }
-            return response.json();
-          })
-          .then(result => {
-            that.jwt = result.access_token;
-            setTimer();
-          }).catch(function(reason) {
-            that.logger.error("fail! reason=" + reason);
-          });
+    const minRefreshInterval = 30 * 1000;
+    return Promise.resolve()
+    .then(()=>{
+      if (this.isRefreshRunning) {
+        return;
       }
-      var setTimer = function setTimer() {
-        var token = decodeJwt(that.jwt);
-        var currentMills = new Date().getTime();
-        var currentTime = Math.round(currentMills / 1000);
-        that.logger.info("current time = " + currentTime + " token.exp = " + token.exp);
-        if (token.exp < currentTime) {
-          that.logger.info("token is expired, so reload this iframe");
-          refreshToken();
-          return;
+      this.jwt = this._resolveToken();
+      if (this.jwt == null) {
+        return;
+      }
+      this.isRefreshRunning = true;
+      var path = this.jwtUpdatepath || "/core.JWTUpdate"
+      if (path.indexOf("/") !== 0) {
+        path = "/" + path;
+      }
+      var url = this.coreNodeURL + path;
+      try {
+        var that = this;
+        var refreshToken = function refreshToken() {
+          var option = {mode: 'cors',
+                        credentials: 'include',
+                        redirect: "follow"
+                      };
+          that._setAuthorizationHeader(option);
+          return fetchImpl(url, option)
+            .then(function(response) {
+              if (response.status == 401) {
+                return Promise.reject("invalid session");
+              } else if (! response.ok) {
+                return Promise.reject("Failed to refresh token:" +  response.statusText);
+              }
+              return response.json();
+            })
+            .then(result => {
+              that._updateToken(result.access_token)
+              that.logger.info("Succeeded to refresh token:")
+              setTimer(that.jwt);
+            }).catch(function(reason) {
+              that.logger.error("fail! reason=" + reason);
+              throw reason;
+            });
         }
-        var timeout = (token.exp - currentTime - 60) * 1000;
-        that.logger.info("set timer at 1 minutes ahead of expiration " + new Date(currentMills + timeout).toLocaleString());
-        setTimeout(refreshToken, timeout)
+
+        var setTimer = function setTimer(jwt) {
+          var token = decodeJwt(jwt);
+          that.logger.info("current time = " + now + " token.exp = " + token.exp);
+          var timeout = (token.exp - now - 60) * 1000;
+          that.tokenTimerId = setTimeout(refreshToken, timeout > minRefreshInterval ? timeout : minRefreshInterval);
+        }
+
+        var now = Math.round(new Date().getTime() / 1000)
+        if (decodeJwt(this.jwt).exp < now) {
+          that.logger.info("token is expired, so reload now");
+          return Promise.resolve()
+            .then(()=>refreshToken())
+            .catch((e)=>{
+              that.logger.error("Failed to refresh initial token. You may fail to connect core-node. Caused by:", e)
+            })
+        }
+        setTimer(this.jwt);
+      } catch (e) {
+        that.logger.error("Failed to start JWT refresh process", e)
       }
-      setTimer();
-    }catch (e) {
-      that.logger.error("Failed to start JWT refresh process", e)
-    }
+    })
   }
 
 
@@ -843,10 +855,7 @@ rnode.start()
     return localService.proxy.onReceive(req, res)
   }
 
-  _createMQTTConnectOption() {
-    var wsOptions = {}
-    this._setAuthorizationHeader(wsOptions);
-
+  _resolveToken() {
     var token = this.jwt;
     if (token == null) {
       try {
@@ -858,6 +867,27 @@ rnode.start()
         //IGNORE
       }
     }
+    return token;
+  }
+  _updateToken(token) {
+    this.jwt = token;
+    if (token != null) {
+      try {
+        var cookies = document && document.cookie && cookie.parse(document.cookie);
+        cookies[COOKIE_NAME_TOKEN] = token;
+        document.cookie = cookie.serialize(COOKIE_NAME_TOKEN, token, {
+          path : "/"
+        });
+      } catch (e) {
+        //IGNORE
+      }
+    }
+  }
+  _createMQTTConnectOption() {
+    var wsOptions = {}
+    this._setAuthorizationHeader(wsOptions);
+    
+    var token = this._resolveToken();
     var ret = {
       keepalive: 30,
       wsOptions
@@ -923,42 +953,52 @@ rnode.start()
 
   _tryToJoinCluster() {
     return Promise.resolve()
+      .then(()=> this._startJWTRefreshProcess())
       .then(()=>{
-        var webSocketPath = process.env.CNODE_WSOCKET_PATH || '/r';
-        var headerOpts = {};
-        this._setAuthorizationHeader(headerOpts);
-        var socket = ioClient(this.coreNodeURL,{
-          path : webSocketPath,
-          extraHeaders : headerOpts.headers,
-          perMessageDeflate
-        });
-        //ResourceNode distinguishes connection-status from resource-node-startup-status.
-        socket.on('connect', ()=>{
-          this.logger.warn("connected to core-node via websocket");
-          //start clustering
-          this._register()
-            .then(()=>{
-              this.isConnected = true;
-              this._notifyConnected()
+       
+        var initSocket = ()=>{
+          var webSocketPath = process.env.CNODE_WSOCKET_PATH || '/r';
+          var headerOpts = {};
+          this._setAuthorizationHeader(headerOpts);
+          var s = ioClient(this.coreNodeURL,{
+            path : webSocketPath,
+            extraHeaders : headerOpts.headers,
+            perMessageDeflate
+          });
+          //ResourceNode distinguishes connection-status from resource-node-startup-status.
+          s.on('connect', ()=>{
+            this.logger.warn("connected to core-node via websocket");
+            //start clustering
+            this._register()
               .then(()=>{
-                if (this.listenerMap["connect"]) {
-                  this.listenerMap["connect"].map((l)=>l.listener())
-                }
+                this.isConnected = true;
+                this._notifyConnected()
+                .then(()=>{
+                  if (this.listenerMap["connect"]) {
+                    this.listenerMap["connect"].map((l)=>l.listener())
+                  }
+                })
               })
-            })
-        });
-        socket.on('disconnect', ()=>{
-          this.logger.warn("disconnected to core-node via websocket");
-          this.isConnected = false;
-          if (this.listenerMap["disconnect"]) {
-            this.listenerMap["disconnect"].map((l)=>l.listener())
-          }
-        });
-        socket.on(this.webSocketMsgName, (msg) =>{
-          this._receive(msg);
-        });
-
-        this.socket = socket;
+          });
+          s.on('disconnect', ()=>{
+            this.logger.warn("disconnected to core-node via websocket");
+            this.isConnected = false;
+            if (this.listenerMap["disconnect"]) {
+              this.listenerMap["disconnect"].map((l)=>l.listener())
+            }
+          });
+          s.on(this.webSocketMsgName, (msg) =>{
+            this._receive(msg);
+          });
+          s.on('error', (e)=>{
+            this.logger.error("error:", e);
+          })
+          s.on('connect_error', (e)=>{
+            this.logger.error("Connection error:", e);
+          })
+          return s;
+        }
+        this.socket = initSocket();
       });
   }
 
@@ -1033,6 +1073,9 @@ rnode.start()
       });
   }
   _leaveCluster() {
+    if (this.tokenTimerId != null) {
+      clearTimeout(this.tokenTimerId);
+    }
     return Promise.resolve()
       .then(()=>this._unregister())
       .then(()=>this._closeSocket());
