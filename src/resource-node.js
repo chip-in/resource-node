@@ -105,7 +105,7 @@ node.start()
       return Promise.resolve();
     }
     var token = this._resolveToken()
-    this.conn = new Connection(this.coreNodeURL, this.userId, this.password, token, this.jwtUpdatepath, {
+    this.conn = new Connection(this.coreNodeURL, null, this.userId, this.password, token, this.jwtUpdatepath, {
       "onConnect" : ()=>this._onConnect(),
       "onDisconnect" : ()=>this._onDisconnect(),
       "onTokenUpdate" : ()=>this._onTokenUpdate()

@@ -4,6 +4,7 @@ import {URL, resolve} from 'url';
 import AbortController from 'abort-controller';
 import AsyncLock from 'async-lock'
 import Connection from '../connection';
+import objectHash from 'object-hash';
 
 const API_PATH_TO_RESOLVE_MEMBERS = "/v1/catalog/service/hmr";
 const API_PATH_TO_RESOLVE_NODE_KEY = "/v1/agent/self";
@@ -222,15 +223,15 @@ class ConsulCluster extends Cluster{
           .then((body)=>this._parseMembers(body))
           .then((members)=>{
             this.logger.info("Succeeded to find initial members. members=" + JSON.stringify(members));
-            this.coreNodeConnections = members.filter((m)=>m.nodeKey !== this.initialConnectionKey).map((m)=>this.toConnObject(m.nodeKey, this._createConnection(m.addr, this.initialConnection.conn)))
+            this.coreNodeConnections = members.filter((m)=>m.nodeKey !== this.initialConnectionKey).map((m)=>this.toConnObject(m.nodeKey, this._createConnection(m.nodeKey, this.initialConnection.conn)))
             this.previousMembers = members;
             return this._watchMembers();
           })
       })
   }
 
-  _createConnection(addr, conn) {
-    return new Connection(_replaceFQDN(conn, addr), conn.userId, conn.password, conn.token, conn.jwtUpdatepath, {})
+  _createConnection(clusterNodeId, conn) {
+    return new Connection(conn.coreNodeURL, "/" + clusterNodeId, conn.userId, conn.password, conn.token, conn.jwtUpdatepath, {})
   }
 
   _watchMembers() {
@@ -308,7 +309,7 @@ class ConsulCluster extends Cluster{
         ret = ret.then(Promise.resolve(this.onMemberJoin(this.getInitConnection())))
       } else {
         this.logger.warn("Join event fired. nodeKey:" + target.nodeKey);
-        ret = ret.then((joinFunc(target.nodeKey, this._createConnection(target.addr, this.getInitConnection()))))
+        ret = ret.then((joinFunc(target.nodeKey, this._createConnection(target.nodeKey, this.getInitConnection()))))
       }
     }
     return ret;
@@ -319,14 +320,14 @@ class ConsulCluster extends Cluster{
     if (idx === -1) {
       return true;
     }
-    if (dataset[idx].addr !== m.addr) {
+    if (dataset[idx].hash !== m.hash) {
       return true;
     }
     return false;
   }
 
   _parseMembers(body) {
-    return body.map((node)=>({addr:node.Address, nodeKey:node.ID}))
+    return body.map((node)=>({hash:objectHash(node), nodeKey:node.ID, name:node.Node}))
   }
 
   _getInitialConnectionKey(conn) {

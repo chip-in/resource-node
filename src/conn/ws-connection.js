@@ -19,8 +19,8 @@ const perMessageDeflate = {
 
 class WSConnection extends AbstractConnection {
 
-  constructor(coreNodeURL, userId, password, token, handlers) {
-    super(coreNodeURL, userId, password, token);
+  constructor(coreNodeURL, basePath, userId, password, token, handlers) {
+    super(coreNodeURL, basePath, userId, password, token);
     this.handlers = handlers;
 
     this.sessionTable = {};
@@ -35,9 +35,10 @@ class WSConnection extends AbstractConnection {
       return new Promise((res, rej)=>{
         var initSocket = ()=>{
           var s = ioClient(this.coreNodeURL,{
-            path : webSocketPath,
+            path : this.basePath + webSocketPath,
             extraHeaders : this.createAuthorizationHeaders(this.userId, this.password, this.token),
-            perMessageDeflate
+            perMessageDeflate,
+            forceNew : true
           });
           s.on('connect', ()=>{
             this.logger.warn("connected to core-node via websocket");

@@ -12,8 +12,8 @@ var staticLogger = new Logger("PNConnectionCommon");
 
 class PNConnection extends Connection {
 
-  constructor(primaryConn, coreNodeURL, userId, password, token, jwtUpdatepath, handlers) { 
-    super(coreNodeURL, userId, password, token, jwtUpdatepath, handlers);
+  constructor(primaryConn, basePath, coreNodeURL, userId, password, token, jwtUpdatepath, handlers) { 
+    super(coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers);
     this.primaryConn = primaryConn;
     this.cluster = new ConsulCluster((c)=>this._onMemberJoin(c),
       (c)=>this._onMemberLeave(c),

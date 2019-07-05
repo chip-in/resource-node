@@ -4,14 +4,15 @@ import AsyncLock from 'async-lock'
 const SEMAPHORE_KEY_NAME = "instance-level-lock";
 
 class ConnectionLogger extends Logger{
-  constructor(category, coreNodeURL) {
+  constructor(category, coreNodeURL, basePath) {
     super(category);
     this.coreNodeURL = coreNodeURL;
     this.delegate = new Logger(category);
+    this.basePath = basePath;
   }
   _log(name, args) {
     args = Array.prototype.slice.call(args)
-    args[0] = "("+this.coreNodeURL+")" + args[0];
+    args[0] = "("+this.coreNodeURL+this.basePath+")" + args[0];
     this.delegate[name].apply(this.delegate, args);
   }
   debug()  {
@@ -29,9 +30,10 @@ class ConnectionLogger extends Logger{
 }
 class AbstractConnection {
 
-  constructor(coreNodeURL, userId, password, token) {
+  constructor(coreNodeURL, basePath, userId, password, token) {
     this.isConnected = false;
-    this.logger = new ConnectionLogger(this.constructor.name || "AbstractConnection", coreNodeURL);
+    this.basePath = basePath || "";
+    this.logger = new ConnectionLogger(this.constructor.name || "AbstractConnection", coreNodeURL, this.basePath);
     this.coreNodeURL = coreNodeURL;
     this.userId = userId;
     this.password = password;

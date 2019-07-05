@@ -12,13 +12,13 @@ const JWT_REFRESH_FETCH_OPTS = {
 
 class Connection extends AbstractConnection{
 
-  constructor(coreNodeURL, userId, password, token, jwtUpdatepath, handlers) { 
-    super(coreNodeURL, userId, password, token)
+  constructor(coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers) { 
+    super(coreNodeURL, basePath, userId, password, token)
     this.initArgs = Array.prototype.slice.call(arguments);
     this.jwtUpdatepath = jwtUpdatepath;
     this.handlers = handlers || {};
-    this.wsConn = new WSConnection(coreNodeURL, userId, password, token, handlers);
-    this.mqttConn = new MQTTConnection(coreNodeURL, userId, password, token);
+    this.wsConn = new WSConnection(coreNodeURL, basePath, userId, password, token, handlers);
+    this.mqttConn = new MQTTConnection(coreNodeURL, basePath, userId, password, token);
   }
 
   getInitialArgs() {

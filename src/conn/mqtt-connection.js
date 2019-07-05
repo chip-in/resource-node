@@ -9,8 +9,8 @@ const mqttPath = process.env.CNODE_MQTT_PATH || "/m";
 
 class MQTTConnection extends AbstractConnection {
 
-  constructor(coreNodeURL, userId, password, token) {
-    super(coreNodeURL, userId, password, token);
+  constructor(coreNodeURL, basePath, userId, password, token) {
+    super(coreNodeURL, basePath, userId, password, token);
     this.mqttclient = null;
     this.subscribers = [];
   }
@@ -147,7 +147,7 @@ class MQTTConnection extends AbstractConnection {
     var coreUrl = url.parse(this.coreNodeURL);
     var coreHost = coreUrl.host;
 
-    return [mqttProto,"://",coreHost,port,mqttPath].join("");
+    return [mqttProto,"://",coreHost,port,this.basePath,mqttPath].join("");
   }
   
   _createMQTTConnectOption() {
