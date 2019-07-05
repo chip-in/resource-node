@@ -1,34 +1,16 @@
 import Logger from './util/logger';
-import ioClient from 'socket.io-client';
 import uuidv4 from 'uuid/v4';
 import url from 'url';
-import WSResponse from './conversion/ws-response';
-import WSRequest from './conversion/ws-request';
-import mqtt from 'mqtt';
 import parser from 'mongo-parse';
 import DirectoryService from './util/directory-service';
 import LocalRequest from './conversion/local-request';
 import LocalResponse from './conversion/local-response';
 import ConfigLoader from './util/config-loader';
-import {fetchImpl, fetchOption} from './util/fetch';
 import cookie from 'cookie';
-import zlib from 'zlib';
+import Connection from './conn/connection';
+import PNConnectom from './conn/pn-connection';
 
 const COOKIE_NAME_TOKEN = "access_token";
-
-var decodeJwt = function (jwt) {
-  return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
-}
-
-const perMessageDeflate = {
-  zlibDeflateOptions : {
-    level: 1 /* zlib.constants.Z_BEST_SPEED */,
-    chunkSize : 1 * 1024 * 1024
-  },
-  zlibInflateOptions : {
-    chunkSize : 1 * 1024 * 1024
-  }
-}
 
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
@@ -80,27 +62,11 @@ class ResourceNode {
      */
     this.started = false;
 
-    /**
-     * @desc コアノードとの接続状態を表すフラグ
-     * @type {boolean}
-     */
-    this.isConnected = false;
-
-    this.proxies = {};
-
-    this.webSocketMsgName = process.env.CNODE_WSOCKET_MSG_NAME || 'ci-msg';    
-
-    this.mqttConnections = {};
-
-    this.sessionTable = {};
-
     this.proxyDirService = new DirectoryService();
 
     this.localProxyMap = {};
 
     this.ctx = {};
-
-    this.operationQueue = [];
 
     this.contextNamespace = "net.chip-in.";
 
@@ -116,11 +82,6 @@ class ResourceNode {
 
     this.listenerMap = {};
 
-    this.mountIdMap = {};
-
-    this.mountListenerMap = {};
-
-    this.keepMqttPubConn = process.env.KEEP_MQTT_PUB_CONN || true;
   }
 
   /**
@@ -143,9 +104,14 @@ node.start()
     if (this.started) {
       return Promise.resolve();
     }
+    var token = this._resolveToken()
+    this.conn = new Connection(this.coreNodeURL, null, this.userId, this.password, token, this.jwtUpdatepath, {
+      "onConnect" : ()=>this._onConnect(),
+      "onDisconnect" : ()=>this._onDisconnect(),
+      "onTokenUpdate" : ()=>this._onTokenUpdate()
+    });
     return Promise.resolve()
-      .then(()=>this._tryToJoinCluster())
-      .then(()=>this._ensureConnected())
+      .then(()=>this.conn.open())
       .then(()=>this._initConnectionContext())
       .then(()=>this._enableServices())
       .then(()=>this._initApplicationContext())
@@ -172,13 +138,16 @@ node.stop()
 });
    */
   stop(force) {
+    if (this.conn == null) {
+      return Promise.resolve();
+    }
     if (!force && !this.started) {
       return Promise.resolve();
     }
     //It doesn't ensure connection
     return Promise.resolve()
       .then(()=>this._disableServices())
-      .then(()=>this._leaveCluster())
+      .then(()=>this.conn.close())
       .then(()=> this.started = false)
   }
 
@@ -254,7 +223,6 @@ Promise.resolve({resultSet:[],restQuery:query, queryHandlers: queryHandlers}).th
    */
   fetch(path, option) {
     return Promise.resolve()
-      .then(()=>this._ensureConnected())
       .then(()=> this._fetch(path, option));
   }
 
@@ -319,9 +287,17 @@ rnode.start()
       this.logger.error("Unknown mode is specified(%s)", mode);
       return Promise.reject(new Error("Unknown mode is specified"));
     }
+    if (mode === "localOnly") {
+      return this._localMount(path, mode, proxy, option)
+        .then((mountId)=>{
+          this.logger.info("Succeeded to mount:%s, %s, %s", path, mode, mountId);
+          return mountId;
+        })
+    }
     return Promise.resolve()
-      .then(()=>this._ensureConnected())
-      .then(()=> this._mount(path, mode, proxy, option || {}));
+      .then(()=>PNConnectom.promote(this.conn))
+      .then((conn)=>this.conn = conn)
+      .then(()=> this.conn.mount(path, mode, proxy, option || {}));
   }
 
   /**
@@ -332,8 +308,16 @@ rnode.start()
    */
   unmount(handle) {
     //It doesn't ensure connection
+    if (this.localProxyMap[handle] != null) {
+        return this._localUnmount(handle)
+          .then(()=>{
+            this.logger.info("Succeeded to unmount:%s", handle );
+          })
+    }
     return Promise.resolve()
-      .then(()=> this._unmount(handle));
+      .then(()=>PNConnectom.promote(this.conn))
+      .then((conn)=>this.conn = conn)
+      .then(()=> this.conn.unmount(handle));
   }
 
   /**
@@ -345,55 +329,10 @@ rnode.start()
    *
    */
   subscribe(topicName, subscriber) {
-    var key = uuidv4();
     return Promise.resolve()
-    .then(()=>this._ensureConnected())
-    .then(()=>{
-      return new Promise((resolve, reject) => {
-        var responded = false;
-        var mqttUrl = this._createMQTTUrl();
-        var mqttConnectOption = this._createMQTTConnectOption();
-        var client = mqtt.connect(mqttUrl, mqttConnectOption);
-        var subscribed = false;
-        client.on("connect", (connack) => {
-          if (!subscribed) {
-            client.subscribe(topicName, {qos: 1}, (e, g) => {
-              subscribed = true;
-              this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
-              if (!responded) {
-                responded = true;
-                resolve(key);
-              }
-            })
-            client.on("message", (topic, message, packet) => {
-              subscriber.onReceive(message);
-            });
-            client.on("error", (e)=>{
-              this.logger.info("Failed to subscribe", e);
-              if (!responded) {
-                responded = true;
-                reject(e)
-              }
-            })
-          }
-        });
-        this.mqttConnections[key] = {
-          client, topicName
-        };
-        this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
-      })
-    })
+      .then(()=>this.conn.subscribe(topicName, subscriber))
   }
 
-  _createMQTTUrl() {
-    var mqttProto = process.env.CNODE_MQTT_PROTO || ((this.coreNodeURL.indexOf("https://") === 0) ? 'wss' : 'ws');
-    var coreUrl = url.parse(this.coreNodeURL);
-    var coreHost = coreUrl.host;
-    var port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
-    var mqttPath = process.env.CNODE_MQTT_PATH || "/m";
-
-    return [mqttProto,"://",coreHost,port,mqttPath].join("");
-  }
   /**
    * @desc 指定したトピックの購読を終了する
    * @param {string} key 購読時に取得したキー文字列
@@ -402,28 +341,8 @@ rnode.start()
    *
    */
   unsubscribe(key) { 
-    var def = this.mqttConnections[key];
-    if (def == null) {
-      this.logger.warn("Key not found:%s", key);
-      return Promise.resolve();
-    }
-    //It doesn't ensure connection
     return Promise.resolve()
-      .then(()=>{
-      return new Promise((resolve, reject) => {
-        def.client.unsubscribe(def.topicName, (e)=>{
-          def.client.end();
-          delete this.mqttConnections[key];
-          if (e) {
-            this.logger.warn("Failed to unsubscribe topic:(%s : %s)", def.topicName, key, e);
-            reject(e);
-            return;
-          }
-          this.logger.info("Succeeded to unsubscribe topic(%s : %s)", def.topicName, key);
-          resolve();
-        })
-      });
-    })
+    .then(()=>this.conn.unsubscribe(key))
   }
 
   /**
@@ -436,50 +355,11 @@ rnode.start()
    */
   publish(topicName, message) {
     return Promise.resolve()
-    .then(()=>this._ensureConnected())
-    .then(()=>{
-      return new Promise((resolve, reject)=>{
-        this._ensureMQTTPublishConnection()
-        .then((conn)=>{
-          conn.publish(topicName, message, {qos: 1, retain: true}, (e)=>{
-            if (!this.keepMqttPubConn) {
-              conn.end();
-            }
-            if (e) {
-              this.logger.error("Failed to publish(%s)", topicName, e);
-              reject(e);
-              return;
-            }
-            this.logger.info("Succeeded to publish(%s)", topicName)
-            resolve();
-          })
-        })
-      });
-    })
+      .then(()=>PNConnectom.promote(this.conn))
+      .then((conn)=>this.conn = conn)
+      .then(()=>this.conn.publish(topicName, message))
   }
-  _ensureMQTTPublishConnection() {
-    var mqttUrl = this._createMQTTUrl();
-    var mqttConnectOption = this._createMQTTConnectOption();
-    return Promise.resolve()
-    .then(()=>{
-      if (this.mqttPubConn) {
-        return this.mqttPubConn;
-      }
-      return new Promise((resolve, reject)=>{
-        var conn = mqtt.connect(mqttUrl, mqttConnectOption);
-        conn.on("connect", ()=>{
-          if (this.keepMqttPubConn) {
-            this.mqttPubConn = conn;
-          }
-          resolve(conn);
-        }); 
-        conn.on("error", (e) => {
-          this.logger.error("mqtt error detected", e);
-          reject(e);
-        })
-      })
-    })
-  }
+
   /**
    * コアノード接続時のBASIC認証情報を設定する。
    * 
@@ -494,62 +374,7 @@ rnode.start()
   setJWTAuthorization(jwt, updatePath ) {
     this.jwt = jwt;
     this.jwtUpdatepath = updatePath;
-    this._startJWTRefreshProcess();
   }
-  _startJWTRefreshProcess() {
-    if (this.jwt == null) {
-      return;
-    }
-    if (this.isRefreshRunning) {
-      return;
-    }
-    this.isRefreshRunning = true;
-    var path = this.jwtUpdatepath || "/core.JWTUpdate"
-    if (path.indexOf("/") !== 0) {
-      path = "/" + path;
-    }
-    var url = this.coreNodeURL + path;
-    try {
-      var that = this;
-      var refreshToken = function refreshToken() {
-        var option = {mode: 'cors'};
-        that._setAuthorizationHeader(option);
-        fetchImpl(url, option)
-          .then(function(response) {
-            if (response.status == 401) {
-              return Promise.reject("invalid session");
-            } else if (! response.ok) {
-              return Promise.reject("Failed to refresh token" +  response.statusText);
-            }
-            return response.json();
-          })
-          .then(result => {
-            that.jwt = result.access_token;
-            setTimer();
-          }).catch(function(reason) {
-            that.logger.error("fail! reason=" + reason);
-          });
-      }
-      var setTimer = function setTimer() {
-        var token = decodeJwt(that.jwt);
-        var currentMills = new Date().getTime();
-        var currentTime = Math.round(currentMills / 1000);
-        that.logger.info("current time = " + currentTime + " token.exp = " + token.exp);
-        if (token.exp < currentTime) {
-          that.logger.info("token is expired, so reload this iframe");
-          refreshToken();
-          return;
-        }
-        var timeout = (token.exp - currentTime - 60) * 1000;
-        that.logger.info("set timer at 1 minutes ahead of expiration " + new Date(currentMills + timeout).toLocaleString());
-        setTimeout(refreshToken, timeout)
-      }
-      setTimer();
-    }catch (e) {
-      that.logger.error("Failed to start JWT refresh process", e)
-    }
-  }
-
 
   /**
    * @desc ユーザや動作環境を保持するコンテキストオブジェクトを取得する.
@@ -601,6 +426,33 @@ rnode.start()
     this.listenerMap[type].push(listenerDef);
     this.logger.info("add eventListener:" + type + ":" + listenerId);
     return listenerId;
+  }
+  _onConnect() {
+    this._on("connect")
+  }
+
+  _onDisconnect() {
+    this._on("disconnect")
+  }
+
+  _onTokenUpdate(token) {
+    if (token != null) {
+      try {
+        var cookies = document && document.cookie && cookie.parse(document.cookie);
+        cookies[COOKIE_NAME_TOKEN] = token;
+        document.cookie = cookie.serialize(COOKIE_NAME_TOKEN, token, {
+          path : "/"
+        });
+      } catch (e) {
+        //IGNORE
+      }
+    }
+  }
+
+  _on(type) {
+    if (this.listenerMap[type]) {
+      this.listenerMap[type].map((l)=>l.listener())
+    }
   }
 
   /**
@@ -815,9 +667,6 @@ rnode.start()
                 path.indexOf("https://") !== 0) {
         return Promise.reject("Invalid url is specified:%s", path);
     }
-    option = Object.assign({}, fetchOption, option);
-    this._normalizeHeader(option);
-    this._setAuthorizationHeader(option);
 
     var urlObj = url.parse(href);
     var localService = null;
@@ -825,8 +674,8 @@ rnode.start()
       (localService = this.proxyDirService.lookup(urlObj.path)) != null) {
         return this._localFetch(path, option, localService);
     }
-    return fetchImpl(href, option);
-   
+
+    return this.conn.fetch(href, option);
   }
 
   _isCoreNodeRequest(urlObj) {
@@ -836,6 +685,7 @@ rnode.start()
       urlObj.hostname.toLocaleLowerCase() === corenodeUrlObj.hostname.toLowerCase() &&
       (urlObj.port || defaultPort) === (corenodeUrlObj.port || defaultPort));
   }
+
   _localFetch(requestHref, option, localService) {
     this._convertHeaderToLowerCase(option);
     var req = new LocalRequest(requestHref, option);
@@ -843,10 +693,7 @@ rnode.start()
     return localService.proxy.onReceive(req, res)
   }
 
-  _createMQTTConnectOption() {
-    var wsOptions = {}
-    this._setAuthorizationHeader(wsOptions);
-
+  _resolveToken() {
     var token = this.jwt;
     if (token == null) {
       try {
@@ -858,54 +705,24 @@ rnode.start()
         //IGNORE
       }
     }
-    var ret = {
-      keepalive: 30,
-      wsOptions
-    };
-
-    if (token == null) {
-      return ret;
-    }
-    ret.username = token;
-    return ret;
-    
-  }
-  _setAuthorizationHeader(option) {
-    if (option == null) {
-      return;
-    }
-    var headers = option.headers;
-    if (!headers) {
-      headers = option.headers = {};
-    }
-    if (this.jwt != null) {
-      headers['Authorization'] = 'Bearer ' + this.jwt;
-    } else if (this.userId != null && this.password != null) {
-      headers['Authorization'] = 'Basic ' + new Buffer(this.userId + ":" + this.password).toString("base64");
-    }
+    return token;
   }
 
-  _normalizeHeader(option) {
-    if (option == null) {
-      return;
-    }
-    var headers = option.headers;
-    if (!headers) {
-      headers = option.headers = {};
-    }
-    var tmp = {};
-    //convert to native object
-    if (typeof headers.getAll === "function") {
-      tmp = {};
-      for (var k in Object.keys(headers)) {
-        var val = headers.getAll(k);
-        tmp[k] = val.length > 1 ? val : val[0];
+  _updateToken(token) {
+    this.jwt = token;
+    if (token != null) {
+      try {
+        var cookies = document && document.cookie && cookie.parse(document.cookie);
+        cookies[COOKIE_NAME_TOKEN] = token;
+        document.cookie = cookie.serialize(COOKIE_NAME_TOKEN, token, {
+          path : "/"
+        });
+      } catch (e) {
+        //IGNORE
       }
-    } else if (headers && typeof headers === "object" ) {
-      tmp = Object.assign(tmp, headers);
     }
-    option.headers = tmp;
   }
+
   _convertHeaderToLowerCase(option) {
     if (option == null) {
       return;
@@ -921,270 +738,13 @@ rnode.start()
     option.headers = ret;
   }
 
-  _tryToJoinCluster() {
-    return Promise.resolve()
-      .then(()=>{
-        var webSocketPath = process.env.CNODE_WSOCKET_PATH || '/r';
-        var headerOpts = {};
-        this._setAuthorizationHeader(headerOpts);
-        var socket = ioClient(this.coreNodeURL,{
-          path : webSocketPath,
-          extraHeaders : headerOpts.headers,
-          perMessageDeflate
-        });
-        //ResourceNode distinguishes connection-status from resource-node-startup-status.
-        socket.on('connect', ()=>{
-          this.logger.warn("connected to core-node via websocket");
-          //start clustering
-          this._register()
-            .then(()=>{
-              this.isConnected = true;
-              this._notifyConnected()
-              .then(()=>{
-                if (this.listenerMap["connect"]) {
-                  this.listenerMap["connect"].map((l)=>l.listener())
-                }
-              })
-            })
-        });
-        socket.on('disconnect', ()=>{
-          this.logger.warn("disconnected to core-node via websocket");
-          this.isConnected = false;
-          if (this.listenerMap["disconnect"]) {
-            this.listenerMap["disconnect"].map((l)=>l.listener())
-          }
-        });
-        socket.on(this.webSocketMsgName, (msg) =>{
-          this._receive(msg);
-        });
-
-        this.socket = socket;
-      });
-  }
-
-  _register() {
-    return Promise.resolve()
-      .then(()=>{
-
-      var uuid = this.nodeId || uuidv4();
-      var registerMsg = {
-        i: uuid,
-        s : "ClusterService",
-        t : "register"
-      };
-      return this._ask(registerMsg)
-        .then((resp)=>{
-          if (resp.t !== "registerResponse") {
-            this.logger.error("Failed to register. Received unexpected response:%s", JSON.stringify(resp));
-            throw new Error("Failed to register. Received unexpected response");
-          }
-          if (!resp.m || resp.m.rc !== 0) {
-            this.logger.error("Failed to register. Received unexpected result code:%s", JSON.stringify(resp));
-            throw new Error("Failed to register. Received unexpected result code");
-          }
-          this.logger.info("Succeeded to register cluster");
-          this.nodeId = uuid;
-          this.userInfo = resp.u || {};
-        });
-    });
-  }
-  _receive( msg) {
-    return new Promise((resolve, reject) => {
-      var isAsk = msg.a;
-      if (isAsk && this.sessionTable[msg.i]) {
-        //answer
-        var session = this.sessionTable[msg.i];
-        delete this.sessionTable[msg.i];
-        session.end(msg);
-        resolve();
-        return;
-      }
-      if (msg.s && msg.s.indexOf("ProxyService:/") === 0 && msg.t !== "request") {
-        this.logger.error("unexpected service(%s) and type(%s)", msg.s, msg.t);
-        return;
-      }
-      var mountId = msg.m.mountId;
-      var proxy = this.proxies[mountId];
-      var req = new WSRequest(msg);
-      var resp = new WSResponse(msg, req);
-      if (!proxy) {
-        this.logger.warn("proxy instance not found");
-        resp.status(404).end();
-        return;
-      }
-      var promise = proxy.onReceive(req, resp);
-      if (promise) {
-        promise.then((resp)=>{
-          if (!resp) {
-            this.logger.warn("Response is empty");
-            return;
-          }
-          var respMsg = Object.assign({}, msg);
-          var copyResp = {};
-          WSResponse.copyTo(copyResp, resp);
-          respMsg.m = copyResp;
-          respMsg.t = "response";
-          this._send(respMsg);
-          resolve();
-        }).catch((e)=>{
-          this.logger.error("Failed to proxy service", e);
-        });
-      }
-      });
-  }
-  _leaveCluster() {
-    return Promise.resolve()
-      .then(()=>this._unregister())
-      .then(()=>this._closeSocket());
-  }
-
-  _unregister() {
-    return Promise.resolve()
-      .then(()=>{
-        if (!this.socket.connected) {
-          return Promise.resolve();
-        }
-        var uuid = uuidv4();
-        var unregisterMsg = {
-          i : uuid,
-          s : "ClusterService",
-          t : "unregister"
-        };
-        return this._ask(unregisterMsg)
-          .then((resp)=>{
-            if (resp.t !== "unregisterResponse") {
-              this.logger.error("Failed to unregister. Received unexpected response:%s", JSON.stringify(resp));
-              //IGNORE
-            } else if (!resp.m || resp.m.rc !== 0) {
-              this.logger.error("Failed to unregister. Received unexpected result code:%s", JSON.stringify(resp));
-              //IGNORE
-            }
-            this.logger.info("Succeeded to unregister cluster");
-            return Promise.resolve();
-          });
-      })
-  }
-
-  _closeSocket() {
-    return Promise.resolve()
-      .then(()=>{
-        var sock = this.socket;
-        if (!sock) {
-          return;
-        }
-        this.socket = null;
-        sock.close();
-      });
-  }
-
   _disableServices() {
     //unmount all
-    return Promise.all(Object.keys(this.proxies).map((p)=>this._unmount(p)))
-      .then(()=>Array.prototype.slice.call(this.serviceInstances).reverse().reduce((prev, current)=>{
-        return prev.then(()=>current.instance.stop(this))
-      }, Promise.resolve()))
-      .then(()=>{
-        this.serviceInstances = [];
-      })
-      .then(()=>{
-        return Promise.all(Object.keys(this.mqttConnections).map((k)=>{
-          var def = this.mqttConnections[k];
-          def.client.unsubscribe(def.topicName, (e)=>{
-          if (e) {
-            this.logger.warn("Failed to unsubscribe topic", e);
-          } else {
-            this.logger.info("Unsubscribe topic on shutdown(%s:%s)", def.topicName, k);
-          }
-          def.client.end();
-        })}))
-        .then(()=>{
-          this.mqttConnections = {};
-        })
-      })
-      .then(()=>{
-        if (this.mqttPubConn != null) {
-          this.mqttPubConn.end();
-          this.mqttPubConn = null;
-        }
-      })
+    return Promise.resolve()
+    .then(()=>this.conn.unmountAll())
+    .then(()=>this.conn.unsubscribeAll())
   }
   
-  _mount(path, mode, proxy, option, internal) {
-    if (mode === "localOnly") {
-      return this._localMount(path, mode, proxy, option);
-    }
-    var key = uuidv4();
-    return Promise.resolve()
-      .then(()=>this._ask({
-        i : key,
-        s : "ProxyService",
-        t : "mount",
-        m : {
-          path : path,
-          mode : mode
-        }
-      }))
-      .then((resp) => {
-        if (resp.t !== "mountResponse") {
-          this.logger.error("Failed to mount. Received unexpected response:%s", JSON.stringify(resp));
-          throw new Error("Failed to mount. Received unexpected response");
-        }
-        if (!resp.m || resp.m.rc !== 0) {
-          this.logger.error("Failed to mount. Received unexpected result code:%s", JSON.stringify(resp));
-          throw new Error("Failed to mount. Received unexpected result code");
-        }
-        var mountId = resp.m.mountId;
-        if (!mountId) {
-          this.logger.error("Failed to mount. MountId not found:%s", JSON.stringify(resp));
-          throw new Error("Failed to mount. MountId not found");
-        }
-        this.logger.info("Succeeded to mount:%s, %s, %s", path, mode, mountId);
-        this.proxies[mountId] = proxy;
-        return mountId;
-    })
-    .then((mountId)=>{
-      if (internal) {
-        return mountId;
-      }
-      this.mountIdMap[mountId] = mountId;
-      var addListener = (func, type) =>{
-        if (typeof func === "function") {
-          return this.addEventListener(type, ()=>{
-            this.logger.debug(type + " event:"+mountId);
-            try {
-              func(mountId);
-            } catch (e) {
-              this.logger.warn(type + " listener error", e);
-              //IGNORE
-            }
-          })
-        }
-      }
-      var disconnectId = addListener(option.onDisconnect, "disconnect");
-      var connectId = addListener(option.onReconnect, "connect");
-      var remountId = null;
-      if (option.remount == null || option.remount) {
-        remountId = addListener(()=>{
-          var prev = this.mountIdMap[mountId];
-          this._unmount(prev, true)
-          .then(()=>this._mount(path, mode, proxy, option, true))
-          .then((newMountId)=>{
-            this.mountIdMap[mountId] = newMountId;
-            if (option.onRemount) {
-              try {
-                option.onRemount(mountId);
-              } catch (e) {
-                this.logger.warn("remount callback error", e);
-                //IGNORE
-              }
-            }
-          })
-        }, "connect");
-      }      
-      this.mountListenerMap[mountId] = [disconnectId, connectId, remountId].filter((s)=>{return s != null;})
-      return mountId;
-    })
-  }
   _localMount(path, mode, proxy, option) {
     var handle = uuidv4();
     return Promise.resolve()
@@ -1200,47 +760,6 @@ rnode.start()
         return handle;
       })
   }
-
-  _unmount(handle, internal) {
-    if (this.localProxyMap[handle] != null) {
-        return this._localUnmount(handle);
-    }
-    var realHandle = internal? handle : this.mountIdMap[handle];
-    var key = uuidv4();
-    return Promise.resolve()
-      .then(()=>this._ask({
-        i : key,
-        s : "ProxyService",
-        t : "unmount",
-        m : {
-          mountId : realHandle
-        }
-      }))
-      .then((resp) => {
-        if (resp.t !== "unmountResponse") {
-          this.logger.error("Failed to unmount. Received unexpected response:%s", JSON.stringify(resp));
-          throw new Error("Failed to unmount. Received unexpected response");
-        }
-        if (!resp.m || resp.m.rc !== 0) {
-          this.logger.error("Failed to unmount. Received unexpected result code:%s", JSON.stringify(resp));
-          throw new Error("Failed to unmount. Received unexpected result code");
-        }
-        this.logger.info("Succeeded to unmount:%s", handle + "(" + realHandle + ")");
-        delete this.proxies[realHandle];
-    })
-    .then(()=>{
-      if (internal) {
-        return ;
-      }
-      var ids = this.mountListenerMap[handle] 
-      if (ids) {
-        ids.map((i)=>this.removeEventListener(i));
-      }
-      delete this.mountListenerMap[handle] ;
-      delete this.mountIdMap[handle] ;
-      
-    })
-  }
   
   _localUnmount(handle) {
     return Promise.resolve()
@@ -1255,62 +774,6 @@ rnode.start()
       });
   }
 
-  _ask(msg) {
-    return new Promise((resolve, reject)=>{
-      this.sessionTable[msg.i] = {
-        end : (resp)=>{
-          resolve(resp);
-        }
-      }
-      Promise.resolve()
-        .then(()=>this._send(Object.assign({a : true}, msg)))
-    });
-    
-  }
-
-  _send(msg) {
-    return Promise.resolve()
-      .then(()=>this.socket.emit(this.webSocketMsgName, msg));
-  }
-
-  _ensureConnected(timeout) {
-    return new Promise((resolve, reject)=>{
-      if (this.isConnected) {
-        this.logger.debug("ensureConnection: OK")
-        resolve();
-        return;
-      }
-      this.logger.debug("ensureConnection: NG")
-      var operation = {
-        resolve, expired : false
-      };
-      this.operationQueue.push(operation);
-      if (timeout) {
-        var timeoutId = setTimeout(()=>{
-          reject(new Error("Connection timeout"));
-          operation.expired = true;
-        }, timeout);
-        operation.timeoutId = timeoutId;
-      }
-    });
-  }
-  _notifyConnected() {
-    this.logger.debug("Connected. So we notify waiter")
-    var target = this.operationQueue;
-    //clear
-    this.operationQueue = [];
-    return Promise.resolve()
-      .then(()=>{
-        target.map((op)=>{
-          if (!op.expired) {
-            op.resolve();
-            if (op.timeoutId) {
-              clearTimeout(op.timeoutId);
-            }
-          }
-        });
-      })
-  }
 }
 
 export default ResourceNode
