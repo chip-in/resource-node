@@ -285,9 +285,13 @@ class PNConnection extends Connection {
         return Promise.resolve(promoteMap[connectionId]);
       }
       var ret = new PNConnection(conn, ...conn.getInitialArgs());
-      promoteMap[connectionId] = ret;
-      staticLogger.info("Succeeded to promote connection")
-      return Promise.resolve(ret);
+      return Promise.resolve()
+      .then(()=>ret._initialize())
+      .then(()=>{
+        promoteMap[connectionId] = ret;
+        staticLogger.info("Succeeded to promote connection")
+        return ret;
+      })
     })
       
   }
