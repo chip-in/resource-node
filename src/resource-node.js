@@ -112,6 +112,7 @@ node.start()
     });
     return Promise.resolve()
       .then(()=>this.conn.open())
+      .then(()=>this.userInfo = this.conn.getUserInformation())
       .then(()=>this._initConnectionContext())
       .then(()=>this._enableServices())
       .then(()=>this._initApplicationContext())

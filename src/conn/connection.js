@@ -219,5 +219,9 @@ class Connection extends AbstractConnection{
   getConnectionId() {
     return this.wsConn.nodeId;
   }
+
+  getUserInformation() {
+    return this.wsConn.userInfo;
+  }
 }
 export default Connection;
