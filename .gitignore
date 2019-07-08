@@ -5,3 +5,4 @@
 examples/*/lib
 examples/*/node_modules
 examples/*/public/dist
+examples/*/package-lock.json
