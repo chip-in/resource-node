@@ -14,21 +14,8 @@ module.exports = {
   devtool: 'inline-source-map',
   module: {
     rules: [
-      {
-        test: /\.css$/,
-        use: [
-          'style-loader',
-          'css-loader'
-        ]
-      }, {
-        test: /\.(jpe?g|png|gif|svg|ico)(\?.+)?$/,
-        use: {
-            loader: 'url-loader',
-            options: {
-                name: './img/[name].[ext]'
-            }
-        }
-    }
+      { test: /\.css$/, loader: ["style-loader", "css-loader"] },
+      { test: /\.(jpe?g|png|gif|svg|ico)(\?.+)?$/, loader: "url-loader"}
     ]
   }, 
   devServer: {
