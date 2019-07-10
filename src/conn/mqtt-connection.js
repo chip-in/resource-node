@@ -88,12 +88,12 @@ class MQTTConnection extends AbstractConnection {
       var responded = false;
       return new Promise((res, rej)=>{
         this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
+        this.subscribers.push({
+          subscriber, key, topicName, 
+          matcher : this._createMatcher(topicName),
+        })
         this.mqttclient.subscribe(topicName, {qos:1}, (e, g)=>{
           this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
-          this.subscribers.push({
-            subscriber, key, topicName, 
-            matcher : this._createMatcher(topicName),
-          })
           if (!responded) {
             responded = true;
             res(key);
