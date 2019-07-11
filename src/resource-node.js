@@ -689,7 +689,7 @@ rnode.start()
 
   _localFetch(requestHref, option, localService) {
     this._convertHeaderToLowerCase(option);
-    var req = new LocalRequest(requestHref, option);
+    var req = new LocalRequest(requestHref, Object.assign({headers:{},cookies:{}},option));
     var res = new LocalResponse(req);
     return localService.proxy.onReceive(req, res)
   }
