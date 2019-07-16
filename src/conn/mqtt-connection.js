@@ -25,11 +25,15 @@ class MQTTConnection extends AbstractConnection {
         var isInit = true;
         this.mqttclient = mqtt.connect(mqttUrl, mqttConnectOption);
         this.mqttclient.on("connect", ()=>{
-          this.logger.info("mqtt connection connected");
           if (isInit) {
+            this.logger.info("mqtt connection connected");
             resolve();
             isInit = false;
           }
+        }); 
+        this.mqttclient.on("reconnect", ()=>{
+          this.logger.info("mqtt connection reconnected");
+          this.isConnected = true;
         }); 
         var onClose = (e)=>{
           this.logger.warn("mqtt connection closed", e ? e : "");

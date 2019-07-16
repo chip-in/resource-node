@@ -58,6 +58,10 @@ class WSConnection extends AbstractConnection {
                 }
               })
           });
+          s.on('reconnect', ()=>{
+            this.logger.warn("reconnected to core-node via websocket");
+            this.isConnected = true;
+          })
           s.on('disconnect', ()=>{
             this.logger.warn("disconnected to core-node via websocket");
             this.isConnected = false;
