@@ -6,6 +6,7 @@ import uuidv4 from 'uuid/v4';
 
 const port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
 const mqttPath = process.env.CNODE_MQTT_PATH || "/m";
+const SUBSCRIBE_QOS = 1
 
 class MQTTConnection extends AbstractConnection {
 
@@ -35,9 +36,12 @@ class MQTTConnection extends AbstractConnection {
           this.isConnected = false;
         }
         this.mqttclient.on("message", (topic, message, packet)=>{
+          const isRetain = packet.retain;
           this.subscribers.map((entry)=>{
-            if (entry.matcher.match(topic).length > 0) {
+            if (entry.matcher.match(topic).length > 0 &&
+                (!isRetain || !entry.retainReceived)) {
               entry.subscriber.onReceive(message);
+              entry.retainReceived = true;
             }
           })
         })
@@ -92,7 +96,9 @@ class MQTTConnection extends AbstractConnection {
           subscriber, key, topicName, 
           matcher : this._createMatcher(topicName),
         })
-        this.mqttclient.subscribe(topicName, {qos:1}, (e, g)=>{
+        var topicObj = {resubscribe:true};
+        topicObj[topicName] = SUBSCRIBE_QOS
+        this.mqttclient.subscribe(topicObj, {}, (e, g)=>{
           this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
           if (!responded) {
             responded = true;
@@ -128,9 +134,18 @@ class MQTTConnection extends AbstractConnection {
       this.logger.warn("Key not found:%s", key);
       return Promise.resolve();
     }
+    //allow duplicated topicName
+    var effectiveSubscribers = this.subscribers.filter((e) => e.key !== key);
+    var effectiveTopicNames = effectiveSubscribers.reduce((dst,v)=>{
+      dst[v.topicName] = true;
+      return dst;
+    },{})
+    const ineffectiveTopicEntries = targets.filter((e)=>effectiveTopicNames[e.topicName] == null)
+    this.logger.info("Succeeded to remove subscriber key(key=%s, target=%s, mqttInvocationTarget=%s). ", 
+      key, JSON.stringify(targets.map((e)=>e.topicName)), JSON.stringify(ineffectiveTopicEntries.map((e)=>e.topicName)));
     return Promise.resolve()
-      .then(()=>this._unsubscribe(targets))
-      .then(()=>this.subscribers = this.subscribers.filter((e) => e.key !== key))
+      .then(()=>this._unsubscribe(ineffectiveTopicEntries))
+      .then(()=>this.subscribers = effectiveSubscribers)
   }
 
   unsubscribeAll() {
