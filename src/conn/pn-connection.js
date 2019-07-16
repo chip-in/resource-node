@@ -32,7 +32,7 @@ class PNConnection extends Connection {
   ensureConnected() {
     return Promise.resolve()
       .then(()=>{
-        return this.lock.acquire(this._getConnectionLockKey(), ()=>{
+        return this._acquireClusterMemberLock(()=>{
           if (this.isConnected) {
             return;
           }
@@ -102,7 +102,7 @@ class PNConnection extends Connection {
       .then(()=>mode==constants.MOUNT_MODE_SINGLETONMASTER?this.cluster.acquireLock(path):Promise.resolve())
       .then(()=>{
         return Promise.resolve()
-        .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+        .then(()=>this._acquireClusterMemberLock(()=>{
           return Promise.resolve()
             .then(()=>this._all((c)=>{
               var connectionId = c.getConnectionId();
@@ -136,7 +136,7 @@ class PNConnection extends Connection {
     .then(()=>this.ensureConnected())
     .then(()=>{
       return Promise.resolve()
-      .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+      .then(()=>this._acquireClusterMemberLock(()=>{
         return Promise.resolve()
           .then(()=>this._all((c)=>{
             var connectionId = c.getConnectionId();
@@ -161,7 +161,7 @@ class PNConnection extends Connection {
     .then(()=>this.ensureConnected())
     .then(()=>{
       return Promise.resolve()
-      .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+      .then(()=>this._acquireClusterMemberLock(()=>{
         return Promise.resolve()
         .then(()=>this._all((c)=>c.unmountAll()))
         .then(()=>{
@@ -205,7 +205,7 @@ class PNConnection extends Connection {
 
   _onMemberJoin(conn) {
     return Promise.resolve()
-      .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+      .then(()=>this._acquireClusterMemberLock(()=>{
         var ret = Promise.resolve()
           .then(()=>conn.ensureConnected());
         var mountOps = this.pnOperationMap["mount"];
@@ -222,7 +222,7 @@ class PNConnection extends Connection {
 
   _onMemberLeave(conn) {
     return Promise.resolve()
-      .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+      .then(()=>this._acquireClusterMemberLock(()=>{
         return Promise.resolve()
           .then(()=>conn.close())
           .catch((e)=>{
@@ -234,7 +234,7 @@ class PNConnection extends Connection {
 
   _onInitialConnClosed(conn) {
     return Promise.resolve()
-      .then(()=>this.lock.acquire(this._getConnectionLockKey, ()=>{
+      .then(()=>this._acquireClusterMemberLock(()=>{
         return Promise.resolve()
           .then(()=>this._close())
           .then(()=>this.isConnected = false)
@@ -270,7 +270,14 @@ class PNConnection extends Connection {
               .then(()=>this.mount(...o.op.mountArgs))
         }))
       })
+  }
 
+  _acquireClusterMemberLock(cb) {
+    if (this.cluster.isNonRedundantMode) {
+      return Promise.resolve()
+        .then(()=>cb())
+    }
+    return this.lock.acquire(this._getConnectionLockKey(), cb)
   }
   
   static promote(conn) {
