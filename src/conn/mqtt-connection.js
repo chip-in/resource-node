@@ -147,9 +147,9 @@ class MQTTConnection extends AbstractConnection {
     const ineffectiveTopicEntries = targets.filter((e)=>effectiveTopicNames[e.topicName] == null)
     this.logger.info("Succeeded to remove subscriber key(key=%s, target=%s, mqttInvocationTarget=%s). ", 
       key, JSON.stringify(targets.map((e)=>e.topicName)), JSON.stringify(ineffectiveTopicEntries.map((e)=>e.topicName)));
+    this.subscribers = effectiveSubscribers
     return Promise.resolve()
       .then(()=>this._unsubscribe(ineffectiveTopicEntries))
-      .then(()=>this.subscribers = effectiveSubscribers)
   }
 
   unsubscribeAll() {
