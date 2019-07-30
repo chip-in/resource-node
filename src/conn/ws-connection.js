@@ -135,7 +135,7 @@ class WSConnection extends AbstractConnection {
       return Promise.resolve();
     }
     return Promise.resolve()
-      .then(()=>this.unmount(key))
+      .then(()=>this.unmount(key, true))
       .then(()=>this.mount(prev.path, prev.mode, prev.proxy, prev.option, true))
       .then((newMountId)=>prev.mountId = newMountId)
       .then(()=>{
