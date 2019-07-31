@@ -6,6 +6,9 @@ import WSRequest from '../conversion/ws-request';
 
 const webSocketPath = process.env.CNODE_WSOCKET_PATH || '/r';
 const webSocketMsgName = process.env.CNODE_WSOCKET_MSG_NAME || 'ci-msg';  
+const webSocketSkipCompress = process.env.CNODE_WSOCKET_SKIP_COMPRESS ? true : false
+const webSocketSkipCompressMaxSize = process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE ? 
+  parseInt(process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE, 10) : 10 * 1024 * 1024
 
 const perMessageDeflate = {
   zlibDeflateOptions : {
@@ -106,7 +109,9 @@ class WSConnection extends AbstractConnection {
   mount(path, mode, proxy, option, isRemount) {
     var key = uuidv4();
     return Promise.resolve()
-      .then(()=>this.ask(this._createRequestMsg(key, "ProxyService", "mount", {path,mode})))
+      .then(()=>this.ask(this._createRequestMsg(key, "ProxyService", "mount", {path,mode,option:{
+        skipCompress : webSocketSkipCompress
+      }})))
       .then((resp) => {
         this._checkResponse(resp, "mount", "mountResponse", ["mountId"]);
         var mountId = resp.m.mountId;
@@ -233,8 +238,9 @@ class WSConnection extends AbstractConnection {
   }
 
   send(msg) {
+    const compressOpt = (msg.o && msg.o.skipCompress) ? false : true
     return Promise.resolve()
-      .then(()=>this.socket.emit(webSocketMsgName, msg));
+      .then(()=>this.socket.compress(compressOpt).emit(webSocketMsgName, msg));
   }
   
   _close() {
@@ -313,9 +319,18 @@ class WSConnection extends AbstractConnection {
   _answerResponse(msg, resp) {
     var copyResp = {};
     WSResponse.copyTo(copyResp, resp);
+    const skipCompress = (msg.o && 
+                        msg.o.skipCompress && 
+                        webSocketSkipCompress && 
+                        resp.body &&
+                        resp.body.length != null &&
+                        resp.body.length < webSocketSkipCompressMaxSize)
     this.send(Object.assign({}, msg, {
       m : copyResp,
-      t : "response"
+      t : "response",
+      o : Object.assign({}, msg.o, {
+        skipCompress
+      })
     }));
   }
   
