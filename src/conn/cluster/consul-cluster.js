@@ -63,7 +63,8 @@ const _appendQuery = (base, index)=> {
   if (index == null) {
     return base;
   }
-  return base + "?wait=" + CONSUL_BLOCKING_QUERY_TIMEOUT + "&index=" + index;
+  var connector = (base.indexOf("?") !== -1) ? "&" : "?"
+  return base + connector + "wait=" + CONSUL_BLOCKING_QUERY_TIMEOUT + "&index=" + index;
 }
 
 const _toURLObject = (baseConn)=> {
@@ -107,7 +108,7 @@ class BlockingQueryInvoker {
     this.cblist = [];
     this.logger = new Logger(this.constructor.name);
     this.lock = new AsyncLock();
-    this.lockKey = "instance-level-lock";
+    this.lockKey = path;
     this.timerId = null;
   }
 
@@ -155,6 +156,19 @@ class BlockingQueryInvoker {
             return resp.json();
           }
           return this._startQuery(this.index);
+        }
+        if (this.index === idx) {
+          //retry
+          this.logger.debug("blocking-query(" + this.path + ") index has not been changed:" + this.index + "=>" + idx)
+          return this._startQuery(this.index);
+        }
+        if (idx < this.index) {
+          //Reset the index if it goes backwards. (https://www.consul.io/api-docs/features/blocking)
+          // => reset and retry
+          this.logger.info("blocking-query(" + this.path + ") index has been reset:" + this.index + "=>" + idx)
+          // we treat it as changed
+        } else {
+          this.logger.debug("blocking-query(" + this.path + ") index has been changed:" + this.index + "=>" + idx)
         }
         return resp.json()
           .then((body)=>{
