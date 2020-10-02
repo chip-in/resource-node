@@ -12,7 +12,7 @@ var staticLogger = new Logger("PNConnectionCommon");
 
 class PNConnection extends Connection {
 
-  constructor(primaryConn, basePath, coreNodeURL, userId, password, token, jwtUpdatepath, handlers) { 
+  constructor(primaryConn, coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers) {
     super(coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers);
     this.primaryConn = primaryConn;
     this.cluster = new ConsulCluster((c)=>this._onMemberJoin(c),
@@ -33,6 +33,7 @@ class PNConnection extends Connection {
     return Promise.resolve()
       .then(()=>{
         return this._acquireClusterMemberLock(()=>{
+          this.logger.debug("Succeeded to acquire cluster member lock to ensure connected")
           if (this.isConnected) {
             return;
           }
@@ -67,6 +68,7 @@ class PNConnection extends Connection {
   publish(topicName, message) {
     return Promise.resolve()
       .then(()=>this.ensureConnected())
+      .then(()=>this._waterfall((c)=>c.ensureConnected()))
       .then(()=>this._all((c)=>c.publish(topicName, message)))
   }
 
@@ -95,7 +97,7 @@ class PNConnection extends Connection {
       })
   }
 
-  mount(path, mode, proxy, option) {
+  mount(path, mode, proxy, option, isRemount, remountId) {
     var mountArgs = Array.prototype.slice.call(arguments);
     return Promise.resolve()
       .then(()=>this.ensureConnected())
@@ -103,16 +105,36 @@ class PNConnection extends Connection {
       .then(()=>{
         return Promise.resolve()
         .then(()=>this._acquireClusterMemberLock(()=>{
+          this.logger.debug("Succeeded to acquire cluster member lock to mount. path:" + path)
+          var handle = isRemount ? remountId : uuidv4()
           return Promise.resolve()
+            .then(()=>this._waterfall((c)=>c.ensureConnected()))
             .then(()=>this._all((c)=>{
               var connectionId = c.getConnectionId();
-              return c.mount(path, mode, proxy, option)
+              var myOption = Object.assign({}, option)
+              if (mode === "singletonMaster") {
+                if (myOption.remount == null || myOption.remount) {
+                  //manually remount when websocket is reconnected
+                  var onReconnect = myOption.onReconnect || (() => {})
+                  var onRemount = myOption.onRemount || (() => {})
+                  myOption.onReconnect = () => {
+                    this.logger.info("Reconnect event is fired for path:" + path)
+                    return Promise.resolve(onReconnect())
+                    .then(()=> this.unmount(handle))
+                    .then(()=> this.mount(path, mode, proxy, myOption, true, handle))
+                    .then(()=> onRemount(handle))
+                  }
+                }
+                //disable remount
+                myOption.remount = false
+                myOption.onRemount = null
+              }
+              return c.mount(path, mode, proxy, myOption)
                 .then((handle)=>{
                   return {connectionId, handle};
                 })
             }))
             .then((handles)=>{
-              var handle = uuidv4()
               this.pnOperationMap["mount"][handle] = {
                 handles : handles.reduce((dst, entry)=>{
                   dst[entry.connectionId] = entry.handle;
@@ -137,7 +159,9 @@ class PNConnection extends Connection {
     .then(()=>{
       return Promise.resolve()
       .then(()=>this._acquireClusterMemberLock(()=>{
+        this.logger.debug("Succeeded to acquire cluster member lock to unmount. mount handle:" + handle)
         return Promise.resolve()
+          .then(()=>this._waterfall((c)=>c.ensureConnected()))
           .then(()=>this._all((c)=>{
             var connectionId = c.getConnectionId();
             if (op.handles[connectionId] == null) {
@@ -206,6 +230,7 @@ class PNConnection extends Connection {
   _onMemberJoin(conn) {
     return Promise.resolve()
       .then(()=>this._acquireClusterMemberLock(()=>{
+        this.logger.debug("Succeeded to acquire cluster member lock to join member")
         var ret = Promise.resolve()
           .then(()=>conn.ensureConnected());
         var mountOps = this.pnOperationMap["mount"];
@@ -223,6 +248,7 @@ class PNConnection extends Connection {
   _onMemberLeave(conn) {
     return Promise.resolve()
       .then(()=>this._acquireClusterMemberLock(()=>{
+        this.logger.debug("Succeeded to acquire cluster member lock to leave member")
         return Promise.resolve()
           .then(()=>conn.close())
           .catch((e)=>{
@@ -235,6 +261,7 @@ class PNConnection extends Connection {
   _onInitialConnClosed(conn) {
     return Promise.resolve()
       .then(()=>this._acquireClusterMemberLock(()=>{
+        this.logger.debug("Succeeded to acquire cluster member lock when initialCon closed")
         return Promise.resolve()
           .then(()=>this._close())
           .then(()=>this.isConnected = false)
@@ -246,29 +273,9 @@ class PNConnection extends Connection {
   }
 
   _onLockExpired(locks) {
-    var remountTargets = [];
     return Promise.resolve()
       .then(()=>{
-        // resolve targets 
-        var allMountInfo = this.pnOperationMap["mount"];
-        for (var handle in allMountInfo) {
-          var op = this.pnOperationMap["mount"][handle]
-          if (op.mountArgs[1] !== constants.MOUNT_MODE_SINGLETONMASTER) {
-            continue;
-          }
-          if (locks.indexOf(op.mountArgs[0]) === -1) {
-            continue;
-          }
-          remountTargets.push({handle,op})
-        }
-        //remount 
-        return Promise.all(remountTargets.map((o)=>{
-          return this.unmount(o.handle)
-              .catch((e)=>{
-                //IGNORE
-              })
-              .then(()=>this.mount(...o.op.mountArgs))
-        }))
+        this.logger.info("lock-expired event is fired. ");
       })
   }
 

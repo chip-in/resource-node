@@ -29,14 +29,23 @@ class WSConnection extends AbstractConnection {
     this.sessionTable = {};
     this._initMountMap();
     this.proxies = {};
+    this.waiters = []
   }
 
   _open(){
+    if (this.socket != null) {
+      this.logger.warn("wait for reconnect");
+      return new Promise((resolve, reject) => {
+        this.logger.warn("notified reconnecting");
+        this.waiters.push(resolve)
+      })
+    }
     var isRespond = false;
     return Promise.resolve()
     .then(()=>{
       return new Promise((res, rej)=>{
         var initSocket = ()=>{
+          this.logger.warn("Start to open websocket connection for core-node");
           var s = ioClient(this.coreNodeURL,{
             path : this.basePath + webSocketPath,
             extraHeaders : this.createAuthorizationHeaders(this.userId, this.password, this.token),
@@ -46,20 +55,40 @@ class WSConnection extends AbstractConnection {
           s.on('connect', ()=>{
             this.logger.warn("connected to core-node via websocket");
             //start clustering
-            this.register()
-              .then(()=>{
-                if (this.handlers.onConnect) {
-                  this.handlers.onConnect();
-                }
-                var mountListeners = this.eventListenerForMount["connect"];
-                for (var k in mountListeners) {
-                  mountListeners[k].map((f)=>f())
-                }
-                if (!isRespond) {
-                  isRespond = true;
-                  res();
-                }
-              })
+            if (this.isRegistering) {
+              this.logger.warn("currently registering. we skip it");
+              return
+            }
+            var doRegister = () => {
+              this.isRegistering = true
+              this.register()
+                .then(()=>{
+                  this.isRegistering = false
+                  if (this.handlers.onConnect) {
+                    this.handlers.onConnect();
+                  }
+                  var mountListeners = this.eventListenerForMount["connect"];
+                  for (var k in mountListeners) {
+                    mountListeners[k].map((f)=>f())
+                  }
+                  if (!isRespond) {
+                    isRespond = true;
+                    res();
+                  }
+                  if (this.waiters.length > 0) {
+                    this.waiters.map((waiter) => waiter())
+                    this.waiters = []
+                  }
+                })
+                .catch((e) => {
+                  this.logger.warn("Failed to register node", e);
+                  this.isRegistering = false
+                  setTimeout(() => {
+                    doRegister()
+                  }, 10 * 1000)
+                })
+            }
+            doRegister()
           });
           s.on('reconnect', ()=>{
             this.logger.warn("reconnected to core-node via websocket");
@@ -196,8 +225,12 @@ class WSConnection extends AbstractConnection {
       var uuid = this.nodeId || uuidv4();
       return this.ask(this._createRequestMsg(uuid, "ClusterService", "register"))
         .then((resp)=>{
-          this._checkResponse(resp, "register", "registerResponse");
-          this.logger.info("Succeeded to register cluster");
+          if (resp.m && resp.m.rc === 400) {
+            this.logger.warn("Node has been already registered(request may be duplicated)");
+          } else {
+            this._checkResponse(resp, "register", "registerResponse");
+            this.logger.info("Succeeded to register cluster");
+          }
           this.nodeId = uuid;
           this.userInfo = resp.u || {};
         });

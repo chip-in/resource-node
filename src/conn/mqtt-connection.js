@@ -14,9 +14,15 @@ class MQTTConnection extends AbstractConnection {
     super(coreNodeURL, basePath, userId, password, token);
     this.mqttclient = null;
     this.subscribers = [];
+    this.waiters = []
   }
 
   _open() {
+    if (this.mqttclient != null) {
+      return new Promise((resolve, reject) => {
+        this.waiters.push(resolve)
+      })
+    }
     return Promise.resolve()
     .then(()=>{
       var mqttUrl = this._createMQTTUrl();
@@ -25,15 +31,19 @@ class MQTTConnection extends AbstractConnection {
         var isInit = true;
         this.mqttclient = mqtt.connect(mqttUrl, mqttConnectOption);
         this.mqttclient.on("connect", ()=>{
+          this.logger.info("mqtt connection connected");
+          this.isConnected = true;
           if (isInit) {
-            this.logger.info("mqtt connection connected");
             resolve();
             isInit = false;
           }
+          if (this.waiters.length > 0) {
+            this.waiters.map((waiter) => waiter())
+            this.waiters = []
+          }
         }); 
         this.mqttclient.on("reconnect", ()=>{
-          this.logger.info("mqtt connection reconnected");
-          this.isConnected = true;
+          this.logger.info("mqtt connection reconnecting...");
         }); 
         var onClose = (e)=>{
           this.logger.warn("mqtt connection closed", e ? e : "");

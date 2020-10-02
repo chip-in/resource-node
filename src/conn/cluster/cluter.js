@@ -2,7 +2,7 @@ import Logger from '../../util/logger';
 import AsyncLock from 'async-lock'
 import uuidv4 from 'uuid/v4';
 
-const IGNORE_CORENODE_CLUSTERING_ERROR = process.env.IGNORE_CORENODE_CLUSTERING_ERROR || "true";
+const IGNORE_CORENODE_CLUSTERING_ERROR = process.env.IGNORE_CORENODE_CLUSTERING_ERROR || "false";
 const ACQUIRE_LOCK_RETRY_INTERVAL = 10 * 1000;
 
 class ConnectionWrapper {
@@ -24,6 +24,7 @@ class Cluster {
     this.onInitialConnClosed = onInitialConnClosed;
     this.onLockExpired = ()=>{
       var expiredLockKey = Object.keys(this.lockedKey);
+      this.logger.warn("lock-expired event is fired. lockKeys='" + JSON.stringify(expiredLockKey) + "'");
       this.lockedKey = {};
       onLockExpired(expiredLockKey)
     };

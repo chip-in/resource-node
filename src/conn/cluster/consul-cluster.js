@@ -20,7 +20,7 @@ const CONSUL_TOKEN_HEADER_NAME = "X-Consul-Token";
 const CONSUL_TOKEN_HEADER_VALUE = process.env.CONSUL_TOKEN_HEADER_VALUE;
 const BLOCKINGQUERY_RETRY_INTERVAL = 60 * 1000;
 const CONSUL_SESSION_TTL = "30s";
-const CONSUL_SESSION_LOCK_DELAY_SECONDS = 5;
+const CONSUL_SESSION_LOCK_DELAY_SECONDS = 10;
 const CONSUL_SESSION_RENEW_INTERVAL = 10 * 1000;
 const CONSUL_SESSION_RENEW_ERROR_THRESHOLD = 3;
 
@@ -390,8 +390,36 @@ class ConsulCluster extends Cluster{
 
   _acquireLock(key) {
     if (this.sessionId == null) {
+      if (this.isSessionInitializing) {
+        this.logger.info("Create session process is running."); 
+        return new Promise((resolve, reject) => {
+          this.sessionIdWaiters.push(() => {
+            return this._acquireLock(key)
+            .then(resolve)
+            .catch(reject)
+          })
+        })
+      }
+      this.logger.info("Try to create session"); 
+      this.isSessionInitializing = true
+      this.sessionIdWaiters = []
       return this._createSession()
-            .then(()=>this._acquireLock(key))
+        .then(()=>this._acquireLock(key))
+        .then(()=> {
+          this.isSessionInitializing = false
+          var waiters = this.sessionIdWaiters
+          this.sessionIdWaiters = []
+          waiters.map((waiter) => waiter())
+        })
+        .catch((e) => {
+          this.logger.error("Failed to acquire lock. ", e); 
+          this.isSessionInitializing = false
+          var waiters = this.sessionIdWaiters
+          this.sessionIdWaiters = []
+          waiters.map((waiter) => waiter())
+          // retry
+          return this._acquireLock(key)
+        })
     }
     var regKey = this._createKVSKey(key)
     var path = API_PATH_TO_LOCK.replace(":key", regKey).replace(":sessionId", this.sessionId);
@@ -411,27 +439,7 @@ class ConsulCluster extends Cluster{
             res();
           }, CONSUL_SESSION_LOCK_DELAY_SECONDS * 1000)
         })
-        .then(()=>_doPutOperation(...lockArgs))
-        .then((ret2)=>{
-          if (ret2) {
-            this.logger.info("Succeeded to acquire lock. SessionId:" + this.sessionId + ", key:" + regKey);
-            return 
-          }
-          //fail(2nd) => retry after blocking-query
-          this.logger.warn("Failed to acquire lock. We wait for key's modification. SessionId:" + this.sessionId + ", key:" + regKey);
-          return new Promise((res, rej) =>{
-            this.keyQueryInvoker = new BlockingQueryInvoker(this.getInitConnection(), path);
-            this.keyQueryInvoker.next((e, data)=>{
-              if (e != null) {
-                rej(e);
-                return;
-              }
-              this.logger.warn("Detect key modification. SessionID=" + this.sessionId + ", key:" + regKey);
-              this.keyQueryInvoker = null;
-              res(this._acquireLock(key));
-            })
-          })
-        })
+        .then(()=> this._acquireLock(key))
       })
   }
 
