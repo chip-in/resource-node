@@ -4,11 +4,11 @@
   "description": "",
   "main": "lib/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node lib/index.js",
     "cleanbuild": "npm run clean && npm run build",
     "build": "babel src -s inline -d lib/",
-    "clean": "del-cli lib"
+    "clean": "rimraf lib",
+    "watch": "npm run clean && babel src -s inline -d lib/ -w",
+    "prepare": "npm run cleanbuild"
   },
   "author": "",
   "dependencies": {
@@ -16,9 +16,9 @@
     "request": "^2.87.0"
   },
   "devDependencies": {
-    "babel-cli": "^6.26.0",
-    "babel-preset-es2015": "^6.24.1",
-    "cpx": "^1.5.0",
-    "del-cli": "^1.1.0"
+    "@babel/cli": "^7.11.6",
+    "@babel/core": "^7.11.6",
+    "@babel/preset-env": "^7.11.5",
+    "rimraf": "^3.0.2"
   }
 }

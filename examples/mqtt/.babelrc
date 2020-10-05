@@ -1,4 +1,10 @@
 {
-    "presets": ["es2015"],
-    "ignore" : ["node_modules", "public"]
-}
+    "presets": [
+      ["@babel/preset-env",
+        {
+          "targets": {
+            "node": true
+          }
+        }]
+    ]
+  }
