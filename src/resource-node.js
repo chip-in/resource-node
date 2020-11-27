@@ -775,6 +775,22 @@ rnode.start()
       });
   }
 
+  /**
+   * JWT トークンが設定されており、かつ有効期限を超過している場合に true を返します。
+   */
+  isTokenExpired() {
+    const jwt = this._resolveToken()
+    if (jwt == null) {
+      return false
+    }
+    const token = JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+    const limit = token.exp
+    const now = Math.round(new Date().getTime() / 1000)
+    if (now < limit) {
+      return false
+    }
+    return true
+  }
 }
 
 export default ResourceNode
