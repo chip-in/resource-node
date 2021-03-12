@@ -164,6 +164,12 @@ class Connection extends AbstractConnection{
   }
 
   _refreshToken(url) {
+    //check token is expired 
+    if (this._decodeJwt(this.token).exp >= this._getNow()) {
+      this.logger.info("RefreshToken timer is invoked but token is not expired.")
+      this._setJWTTimer(this.token, url);
+      return
+    }
     return this.fetch(url, JWT_REFRESH_FETCH_OPTS)
       .then(function(response) {
         if (response.status == 401) {
