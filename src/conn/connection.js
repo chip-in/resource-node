@@ -179,8 +179,9 @@ class Connection extends AbstractConnection{
         this._setJWTTimer(result.access_token, url);
       })
       .catch((e) => {
-        this.logger.error("fail! reason=" + e);
-        throw e;
+        this.logger.warn("fail! reason=" + e);
+        // retry
+        this._setJWTTimer(result.access_token, url);
       });
   }
   _updateToken(token) {
