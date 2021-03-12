@@ -213,7 +213,7 @@ class Connection extends AbstractConnection{
     var now = this._getNow();
     this.logger.info("current time = " + now + " token.exp = " + token.exp);
     var timeout = (token.exp - now - 60) * 1000;
-    return timeout > JWT_MIN_REFRESH_INTERVAL ? timeout : JWT_MIN_REFRESH_INTERVAL;
+    return timeout > JWT_MIN_REFRESH_INTERVAL ? (timeout > 0x7FFFFFFF ? 0x7FFFFFFF : timeout) : JWT_MIN_REFRESH_INTERVAL;
   }
 
   getConnectionId() {
