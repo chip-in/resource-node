@@ -275,9 +275,13 @@ class ConsulCluster extends Cluster{
     
         var leavedMember = this.previousMembers.filter((m)=>this._hasMemberChanged(newIds, current, m));
         var joinedMember = current.filter((m)=>this._hasMemberChanged(prevIds, this.previousMembers, m));
+        var joinedMemberWithoutInitConn = joinedMember.filter((m)=>m.nodeKey !== this.initialConnectionKey)
+        if (joinedMember.length !== joinedMemberWithoutInitConn.length) {
+          this.logger.info("Detect join event of initial connection(" + this.initialConnectionKey + "). We skip it.");
+        }
         return Promise.resolve()
           .then(()=>this._notifyLeavedMember(leavedMember))
-          .then(()=>this._notifyJoinedMember(joinedMember))
+          .then(()=>this._notifyJoinedMember(joinedMemberWithoutInitConn))
           .then(()=>this.previousMembers = current)
       })
   }
