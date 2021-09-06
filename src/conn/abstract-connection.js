@@ -53,9 +53,14 @@ class AbstractConnection {
           .then(()=>this._open())
           .then(()=>this.isConnected = true)
       }))
+      .catch((e) => {
+        this.logger.error("Failed to ensure connected", e)
+        throw e
+      })
   }
 
   open() {
+    this.logger.info("Try to open connection")
     return Promise.resolve()
       .then(()=>this.lock.acquire(SEMAPHORE_KEY_NAME, ()=>{
         if (this.isConnected) {
@@ -65,6 +70,10 @@ class AbstractConnection {
           .then(()=>this._open())
           .then(()=>this.isConnected = true)
       }))
+      .catch((e) => {
+        this.logger.error("Failed to open connection", e)
+        throw e
+      })
   }
 
   _open() {
@@ -72,6 +81,7 @@ class AbstractConnection {
   }
 
   close() {
+    this.logger.info("Try to close connection")
     return Promise.resolve()
       .then(()=>this.lock.acquire(SEMAPHORE_KEY_NAME, ()=>{
         if (!this.isConnected) {
@@ -81,6 +91,10 @@ class AbstractConnection {
           .then(()=>this._close())
           .then(()=>this.isConnected = false);
       }))
+      .catch((e) => {
+        this.logger.error("Failed to close connection", e)
+        throw e
+      })
   }
 
   _close() {
