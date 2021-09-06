@@ -94,8 +94,8 @@ class WSConnection extends AbstractConnection {
             this.logger.warn("reconnected to core-node via websocket");
             this.isConnected = true;
           })
-          s.on('disconnect', ()=>{
-            this.logger.warn("disconnected to core-node via websocket");
+          s.on('disconnect', (reason)=>{
+            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}`);
             this.isConnected = false;
             if (this.handlers.onDisconnect) {
               this.handlers.onDisconnect();
@@ -104,12 +104,18 @@ class WSConnection extends AbstractConnection {
             for (var k in mountListeners) {
               mountListeners[k].map((f)=>f())
             }
+            if (reason === "io server disconnect") {
+              this.socket.connect()
+            }
           });
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg);
           });
           s.on('error', (e)=>{
             this.logger.error("error:", e);
+            if (this.isRegistering) {
+              this.isRegistering = false
+            }
           })
           s.on('connect_error', (e)=>{
             this.logger.error("Connection error:", e);
@@ -223,6 +229,7 @@ class WSConnection extends AbstractConnection {
       .then(()=>{
 
       var uuid = this.nodeId || uuidv4();
+      this.logger.info(`Try to register cluster: ${uuid}`);
       return this.ask(this._createRequestMsg(uuid, "ClusterService", "register"))
         .then((resp)=>{
           if (resp.m && resp.m.rc === 400) {
