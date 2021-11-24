@@ -32,14 +32,8 @@ class CIConfigParser {
   }
   
   parse(parser, nodes, lexer) {
-    var tag = parser.peekToken();
-    var indent = tag.colno - 1;
     var tok = parser.nextToken();
     var args = parser.parseSignature(null, true);
-    args.children[0].addChild(new nodes.Pair(tag.lineno,
-      tag.colno,
-       new nodes.Symbol(tok.lineno, tok.colno, "indent"),
-       new nodes.Literal(tok.lineno, tok.colno, String(indent))))
     parser.advanceAfterBlockEnd(tok.value);
     return new nodes.CallExtensionAsync(this, 'run', args);
   }
@@ -54,7 +48,7 @@ class CINodeConfigParser extends CIConfigParser{
   run(context, args, callback) {
     new ConfigLoader(this.rnode)
       ._loadYaml(args.ref)
-      .then((ret)=>callback(null, doIndent(ret, parseInt(args.indent))))
+      .then((ret)=>callback(null, doIndent(ret, parseInt(args.indent || 0))))
       .catch((e)=>callback(e))
   }
 }

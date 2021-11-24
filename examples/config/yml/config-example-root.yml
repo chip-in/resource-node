@@ -1,0 +1,5 @@
+{% if false %}
+{%   ciNodeConfig ref="/c/rn/config-example-error.yml" %}
+{% else %}
+{%   ciNodeConfig ref="/c/rn/config-example-child.yml" %}
+{% endif %}

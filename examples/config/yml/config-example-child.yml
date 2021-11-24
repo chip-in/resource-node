@@ -1,0 +1,17 @@
+name: config-example-child1
+serviceEngines:
+# substance
+- class: ConfigTest1
+  name: config-test-1
+  option:
+    {% ciNodeConfig ref="/c/rn/config-example-common.yml", indent=4 %}
+- class: ConfigTest2
+  name: config-test-2
+  option:
+    list:
+    - name: child-a
+      option: 
+        {% ciNodeConfig ref="/c/rn/config-example-common.yml", indent=8 %}
+    - name: child-b
+      option: 
+        {% ciNodeConfig ref="/c/rn/config-example-common.yml", indent=8  %}
