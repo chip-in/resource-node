@@ -41,9 +41,12 @@ class PNConnection extends Connection {
           .then(()=>this._initialize())
           .then(()=>this._waterfall((c)=>c.ensureConnected()))
           .then(()=>{
-              staticLogger.info("Succeeded to ensure connected for all corenode")
+            this.logger.info("Succeeded to ensure connected for all corenode")
               this.isConnected = true
           })
+        }).catch((e) => {
+          this.logger.error("Failed to ensure connected for all corenode", e)
+          throw e
         })
       })
   }
@@ -117,12 +120,22 @@ class PNConnection extends Connection {
                   //manually remount when websocket is reconnected
                   var onReconnect = myOption.onReconnect || (() => {})
                   var onRemount = myOption.onRemount || (() => {})
+                  var isReconnecting = false
                   myOption.onReconnect = () => {
+                    if (isReconnecting) {
+                      this.logger.info("Reconnect event has already fired for path:" + path)
+                      return
+                    }
                     this.logger.info("Reconnect event is fired for path:" + path)
+                    isReconnecting = true
                     return Promise.resolve(onReconnect())
-                    .then(()=> this.unmount(handle))
+                    .then(()=> this.unmount(handle, true))
                     .then(()=> this.mount(path, mode, proxy, myOption, true, handle))
                     .then(()=> onRemount(handle))
+                    .then(()=> isReconnecting = false)
+                    .catch((e) => {
+                      isReconnecting = false
+                    })
                   }
                 }
                 //disable remount
@@ -145,10 +158,13 @@ class PNConnection extends Connection {
               return handle;
             })
         }))
+      }).catch((e) => {
+        this.logger.error("Failed to mount", e)
+        throw e
       })
   }
 
-  unmount(handle) {
+  unmount(handle, isRemount) {
     var op = this.pnOperationMap["mount"][handle];
     if (op == null) {
       this.logger.warn("Failed to resolve unmount key. mount handle:" + handle)
@@ -171,12 +187,17 @@ class PNConnection extends Connection {
             return c.unmount(op.handles[connectionId])
           }))
           .then(()=>{
-            delete this.pnOperationMap["mount"][handle];
+            if (!isRemount) {
+              delete this.pnOperationMap["mount"][handle];
+            }
             if (op.mountArgs[1] === constants.MOUNT_MODE_SINGLETONMASTER) {
               return this.cluster.abandonLock(op.mountArgs[0]);
             }
           })
       }))
+    }).catch((e) => {
+      this.logger.error("Failed to unmount", e)
+      throw e
     })
   }
   
@@ -202,6 +223,10 @@ class PNConnection extends Connection {
           })
         })
       }))
+      .catch((e) => {
+        this.logger.warn("Failed to unmount All", e)
+        throw e
+      })
     })
   }
 
@@ -242,7 +267,10 @@ class PNConnection extends Connection {
                   op.handles[conn.getConnectionId()] = handle;
                 })
               }), ret);
-      }))
+      })).catch((e) => {
+        this.logger.error("Failed to process for join member", e)
+        throw e
+      })
   }
 
   _onMemberLeave(conn) {
@@ -255,6 +283,9 @@ class PNConnection extends Connection {
             this.logger.warn("Failed to close leaved connection", e)
             //IGNORE
           })
+      }).catch((e) => {
+        this.logger.error("Failed to process for leave member", e)
+        throw e
       }))
   }
 
@@ -269,6 +300,9 @@ class PNConnection extends Connection {
             this.logger.warn("Failed to close leaved init connection", e)
             //IGNORE
           })
+      }).catch((e) => {
+        this.logger.error("Failed to process for closing initial conn", e)
+        throw e
       }))
   }
 
@@ -306,6 +340,9 @@ class PNConnection extends Connection {
         staticLogger.info("Succeeded to promote connection")
         return ret;
       })
+    }).catch((e) => {
+      staticLogger.info("Failed to promote connection", e)
+      throw e
     })
       
   }

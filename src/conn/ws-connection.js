@@ -59,11 +59,16 @@ class WSConnection extends AbstractConnection {
               this.logger.warn("currently registering. we skip it");
               return
             }
+            if (this.isRegistered) {
+              this.logger.warn("node has already registered. we skip it");
+              return
+            }
             var doRegister = () => {
               this.isRegistering = true
               this.register()
                 .then(()=>{
                   this.isRegistering = false
+                  this.isRegistered = true
                   if (this.handlers.onConnect) {
                     this.handlers.onConnect();
                   }
@@ -83,9 +88,11 @@ class WSConnection extends AbstractConnection {
                 .catch((e) => {
                   this.logger.warn("Failed to register node", e);
                   this.isRegistering = false
-                  setTimeout(() => {
-                    doRegister()
-                  }, 10 * 1000)
+                  // if (this.isRegistered) {
+                  //   setTimeout(() => {
+                  //     doRegister()
+                  //   }, 30 * 1000)
+                  // }
                 })
             }
             doRegister()
@@ -94,9 +101,8 @@ class WSConnection extends AbstractConnection {
             this.logger.warn("reconnected to core-node via websocket");
             this.isConnected = true;
           })
-          s.on('disconnect', ()=>{
-            this.logger.warn("disconnected to core-node via websocket");
-            this.isConnected = false;
+          s.on('disconnect', (reason)=>{
+            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}`);
             if (this.handlers.onDisconnect) {
               this.handlers.onDisconnect();
             }
@@ -104,12 +110,34 @@ class WSConnection extends AbstractConnection {
             for (var k in mountListeners) {
               mountListeners[k].map((f)=>f())
             }
+            if (reason === "io server disconnect") {
+              this.socket.connect()
+            }
+            this.isRegistered = false
           });
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg);
           });
           s.on('error', (e)=>{
             this.logger.error("error:", e);
+            if (this.isRegistering) {
+              this.isRegistering = false
+            }
+            var sessions = this.sessionTable
+            this.sessionTable = {}
+            for (var id in sessions) {
+              var session = sessions[id];
+              this.logger.warn(`Try to close session:${id}`);
+              try {
+                session.end(Object.assign({}, session.req, {m:{
+                  rc: 999
+                }}))
+                this.logger.info(`Succeeded to close session:${id}`);
+              } catch (e) {
+                this.logger.warn(`Failed to close session:${id}`, e);
+                //IGNORE
+              }
+            }
           })
           s.on('connect_error', (e)=>{
             this.logger.error("Connection error:", e);
@@ -223,6 +251,7 @@ class WSConnection extends AbstractConnection {
       .then(()=>{
 
       var uuid = this.nodeId || uuidv4();
+      this.logger.info(`Try to register cluster: ${uuid}`);
       return this.ask(this._createRequestMsg(uuid, "ClusterService", "register"))
         .then((resp)=>{
           if (resp.m && resp.m.rc === 400) {
@@ -262,7 +291,8 @@ class WSConnection extends AbstractConnection {
       this.sessionTable[msg.i] = {
         end : (resp)=>{
           resolve(resp);
-        }
+        },
+        req : msg
       }
       Promise.resolve()
         .then(()=>this.send(Object.assign({a : true}, msg)))
