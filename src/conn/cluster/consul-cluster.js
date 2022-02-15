@@ -338,9 +338,9 @@ class ConsulCluster extends Cluster{
     if (idx === -1) {
       return true;
     }
-    if (dataset[idx].hash !== m.hash) {
-      return true;
-    }
+    // if (dataset[idx].hash !== m.hash) {
+    //   return true;
+    // }
     return false;
   }
 
