@@ -49,7 +49,6 @@ class WSConnection extends AbstractConnection {
           var s = ioClient(this.coreNodeURL,{
             path : this.basePath + webSocketPath,
             extraHeaders : this.createAuthorizationHeaders(this.userId, this.password, this.token),
-            perMessageDeflate,
             forceNew : true
           });
           s.on('connect', ()=>{
