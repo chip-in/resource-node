@@ -18,7 +18,7 @@ class Subscriber {
    *
    *
    */
-  onReceive(msg) {
+  onReceive(msg) {/*eslint-disable-line no-unused-vars*/
     
   }
 }

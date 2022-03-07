@@ -16,6 +16,7 @@ export default class LocalResponse extends WSResponse{
       val = typeof this.body === "string" ?
         JSON.parse(this.body) : this.body;
     } catch (e) {
+      //IGNORE
     }
     return Promise.resolve(val);
   }

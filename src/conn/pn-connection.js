@@ -10,14 +10,54 @@ const connConversionLock = new AsyncLock()
 var promoteMap = {};
 var staticLogger = new Logger("PNConnectionCommon");
 
+const MOUNT_RETRY_TIMEOUT_WHEN_RECOVER = 10 * 1000
+
 class PNConnection extends Connection {
 
   constructor(primaryConn, coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers) {
     super(coreNodeURL, basePath, userId, password, token, jwtUpdatepath, handlers);
     this.primaryConn = primaryConn;
+    this.mountRetryInfo = []
+
+    this.primaryConn.addConnectEventListener(() => {
+      if(this.isRecovering) {
+        return
+      }
+      return Promise.resolve()
+      .then(()=>this.primaryConn.setSuspended(false))
+      .then(()=>this.cluster.resume())
+      .then(()=>this.logger.info("Succeeded to resume cluster"))
+      .then(()=>{
+        const mountRetryInfo = this.mountRetryInfo
+        this.mountRetryInfo = []
+        mountRetryInfo.map(({mountArgs, resolve, reject})=> {
+          this.mount.apply(this, mountArgs).then(resolve).catch(reject)
+        })
+      })
+      .catch((e)=>{
+        this.logger.error("Failed to resume cluster", e)
+        this.logger.info("We remount all.");
+        return this._onInitialConnClosed()
+      })
+    })
+
+    this.primaryConn.addDisconnectEventListener(()=> {
+      if(this.isRecovering) {
+        return
+      }
+      return Promise.resolve()
+      .then(()=>this.cluster.suspend())
+      .then(()=>this.primaryConn.setSuspended(true))
+      .then(()=>this.logger.info("Succeeded to suspend cluster"))
+      .catch((e)=>{
+        this.logger.error("Failed to suspend cluster", e)
+        //CONTINUE
+      })
+    })
+
     this.cluster = new ConsulCluster((c)=>this._onMemberJoin(c),
       (c)=>this._onMemberLeave(c),
-      (c)=>this._onInitialConnClosed(c),
+      (c)=>this._onInitialConnClosed(),/*eslint-disable-line no-unused-vars*/
       (locks)=>this._onLockExpired(locks))
     this.pnOperationMap = {
       "subscribe" : {},
@@ -38,7 +78,6 @@ class PNConnection extends Connection {
             return;
           }
           return Promise.resolve()
-          .then(()=>this._initialize())
           .then(()=>this._waterfall((c)=>c.ensureConnected()))
           .then(()=>{
             this.logger.info("Succeeded to ensure connected for all corenode")
@@ -53,14 +92,12 @@ class PNConnection extends Connection {
 
   _open() {
     return Promise.resolve()
-      .then(()=>this._initialize())
       .then(()=>this._waterfall((c)=>c._open()))
   }
 
   _close() {
     return Promise.resolve()
-      .then(()=>PNConnection.demote(this))
-      .then((c)=>c.close())
+      .then(()=>this._finalize())
   }
   
   fetch(href, option) {
@@ -114,35 +151,7 @@ class PNConnection extends Connection {
             .then(()=>this._waterfall((c)=>c.ensureConnected()))
             .then(()=>this._all((c)=>{
               var connectionId = c.getConnectionId();
-              var myOption = Object.assign({}, option)
-              if (mode === "singletonMaster") {
-                if (myOption.remount == null || myOption.remount) {
-                  //manually remount when websocket is reconnected
-                  var onReconnect = myOption.onReconnect || (() => {})
-                  var onRemount = myOption.onRemount || (() => {})
-                  var isReconnecting = false
-                  myOption.onReconnect = () => {
-                    if (isReconnecting) {
-                      this.logger.info("Reconnect event has already fired for path:" + path)
-                      return
-                    }
-                    this.logger.info("Reconnect event is fired for path:" + path)
-                    isReconnecting = true
-                    return Promise.resolve(onReconnect())
-                    .then(()=> this.unmount(handle, true))
-                    .then(()=> this.mount(path, mode, proxy, myOption, true, handle))
-                    .then(()=> onRemount(handle))
-                    .then(()=> isReconnecting = false)
-                    .catch((e) => {
-                      isReconnecting = false
-                    })
-                  }
-                }
-                //disable remount
-                myOption.remount = false
-                myOption.onRemount = null
-              }
-              return c.mount(path, mode, proxy, myOption)
+              return c.mount(path, mode, proxy, option)
                 .then((handle)=>{
                   return {connectionId, handle};
                 })
@@ -159,8 +168,15 @@ class PNConnection extends Connection {
             })
         }))
       }).catch((e) => {
-        this.logger.error("Failed to mount", e)
-        throw e
+        if ((this.isSuspendError(e) || this.cluster.isAcquiringCancelError(e)) && mode === constants.MOUNT_MODE_SINGLETONMASTER) {
+          this.logger.warn(`Failed to mount(${path}) by disconnecting server. We retry after connection is recovered. `)
+          return new Promise((resolve, reject) => {
+            this.mountRetryInfo.push({mountArgs, resolve, reject})
+          })
+        } else {
+          this.logger.error("Failed to mount", e)
+          throw e
+        }
       })
   }
 
@@ -230,8 +246,21 @@ class PNConnection extends Connection {
     })
   }
 
-  _initialize() {
-    return this.cluster.initialize(this.primaryConn);
+  _initialize(connectionId) {
+  return this.cluster.initialize(this.primaryConn)
+  .then(() => {
+      promoteMap[connectionId] = this;
+    })
+  }
+
+  _finalize() {
+    this.logger.info("PNConnection finalize process start")
+    return this.cluster.finalize(true)
+      .then(()=>this.logger.info("Succeeded to finalize all connection"))
+      .catch((e) => {
+        this.logger.warn("Failed to finalize PNConnection", e)
+        //IGNORE
+      })
   }
 
   _waterfall(func, reverse, doAll) {
@@ -246,10 +275,8 @@ class PNConnection extends Connection {
     return this.cluster.one(func);
   }
 
-  _handlePromotedConn(conn) {
-    var subscribeOps =  this.pnOperationMap["subscribe"]
-    return Object.keys(subscribeOps)
-          .reduce((p, k)=>p.then(()=>conn.subscribe(...subscribeOps[k])), ret);
+  _subconnections(func) {
+    return this.cluster.subconnections(func)
   }
 
   _onMemberJoin(conn) {
@@ -289,13 +316,40 @@ class PNConnection extends Connection {
       }))
   }
 
-  _onInitialConnClosed(conn) {
+  _onInitialConnClosed(mountRetryInfo) {
+    mountRetryInfo = mountRetryInfo || this.mountRetryInfo
+    this.mountRetryInfo = []
+    this.logger.info("Initialized connection close event is fired")
+    if(this.isRecovering) {
+      this.logger.info("recovery process already invoked. We retry later")
+      this.needRetry = true
+      return
+    }
+    const finishRecoveryProcess = () => {
+      this.isRecovering = false
+      if (this.needRetry) {
+        setImmediate(() => {
+          this.needRetry = false
+          this.logger.info("Retrying recovery process")
+          this._onInitialConnClosed(mountRetryInfo)
+        })
+      }
+    }
+    this.isRecovering = true
     return Promise.resolve()
       .then(()=>this._acquireClusterMemberLock(()=>{
-        this.logger.debug("Succeeded to acquire cluster member lock when initialCon closed")
+        this.logger.info("Succeeded to acquire cluster member lock when initialCon closed")
         return Promise.resolve()
-          .then(()=>this._close())
-          .then(()=>this.isConnected = false)
+          .then(()=>this._finalize())
+          .then(()=>{
+            const connectionId = this.primaryConn.getConnectionId();
+            delete promoteMap[connectionId]
+
+            this.primaryConn = this.primaryConn.newConnection()
+            this.isConnected = false
+            this.logger.info(`Try to connect URL ${this.primaryConn.coreNodeURL}`)
+            return this.primaryConn.ensureConnected()
+          })
           .catch((e)=>{
             this.logger.warn("Failed to close leaved init connection", e)
             //IGNORE
@@ -304,12 +358,73 @@ class PNConnection extends Connection {
         this.logger.error("Failed to process for closing initial conn", e)
         throw e
       }))
+      .then(() => {
+        this.logger.info("Succeeded to connect new node")
+        const newConId = this.primaryConn.getConnectionId()
+        return connConversionLock.acquire(newConId, ()=>{
+          this.logger.info("Succeeded to conn conversion lock for initialCon closed")
+          return Promise.resolve()
+          .then(()=>this._initialize(newConId))
+          .then(()=> {
+            const oldPnOperationMap = this.pnOperationMap
+            this.pnOperationMap = {
+              "subscribe" : {},
+              "mount" : {}
+            }
+            return Object.keys(oldPnOperationMap["mount"]).reduce((p, handle)=>{
+              const op = oldPnOperationMap["mount"][handle];
+              return p.then(()=>{
+                return new Promise((resolve, reject) => {
+                  let timeout = false
+                  let timeoutId = null
+                  this.mount.apply(this, op.mountArgs).then(()=>{
+                    if (timeout) {
+                      return
+                    }
+                    clearTimeout(timeoutId)
+                    resolve()
+                  }).catch(reject)
+                  timeoutId = setTimeout(()=> {
+                    timeout = true
+                    this.logger.warn(`Recovering mount path(${op.mountArgs[0]}) is still going on. This will be succeeded when lock is acquired or server is restored.`)
+                    resolve()
+                  }, MOUNT_RETRY_TIMEOUT_WHEN_RECOVER)
+                })
+              })
+            }, Promise.resolve())
+            .then(() => {
+              return Object.keys(oldPnOperationMap["subscribe"]).reduce((p, k)=>{
+                const args = oldPnOperationMap["subscribe"][k];
+                return p.then(()=>this.subscribe.apply(this, args))
+              }, Promise.resolve());
+            })
+            .then(() => {
+              mountRetryInfo.map(({mountArgs, resolve, reject})=> {
+                this.mount.apply(this, mountArgs).then(resolve).catch(reject)
+              })
+            })
+          })
+          .then(()=>{
+            staticLogger.info("Succeeded to (re)promote connection")
+          })
+        }).catch((e) => {
+          staticLogger.info("Failed to (re)promote connection", e)
+          throw e
+        })
+      }).then(() => {
+        finishRecoveryProcess()
+      }).catch((e) => {
+        staticLogger.info("Failed to (re)promote connection", e)
+        finishRecoveryProcess()
+        throw e
+      })
   }
 
-  _onLockExpired(locks) {
+  _onLockExpired(locks) {/*eslint-disable-line no-unused-vars*/
     return Promise.resolve()
       .then(()=>{
-        this.logger.info("lock-expired event is fired. ");
+        this.logger.info("lock-expired event is fired. We remount all.");
+        return this._onInitialConnClosed()
       })
   }
 
@@ -318,7 +433,10 @@ class PNConnection extends Connection {
       return Promise.resolve()
         .then(()=>cb())
     }
-    return this.lock.acquire(this._getConnectionLockKey(), cb)
+    return this.lock.acquire(this._getConnectionLockKey(), ()=> {
+      return Promise.resolve()
+      .then(()=>cb())
+    })
   }
   
   static promote(conn) {
@@ -334,9 +452,8 @@ class PNConnection extends Connection {
       }
       var ret = new PNConnection(conn, ...conn.getInitialArgs());
       return Promise.resolve()
-      .then(()=>ret._initialize())
+      .then(()=>ret._initialize(connectionId))
       .then(()=>{
-        promoteMap[connectionId] = ret;
         staticLogger.info("Succeeded to promote connection")
         return ret;
       })
@@ -365,12 +482,14 @@ class PNConnection extends Connection {
             return conn.cluster.getInitConnection();
           }
           return Promise.resolve()
-          .then(()=>conn._all((c)=>c.close()))
-          .then(()=>conn.cluster.finalize())
+          .then(()=>conn._subconnections((c)=>c.close()))
           .then(()=>{
             staticLogger.info("Succeeded to demote connection")
             return conn.cluster.getInitConnection();
           })
+        }).catch((e) => {
+          staticLogger.info("Failed to demote connection", e)
+          throw e
         })
       })
 
@@ -384,5 +503,22 @@ class PNConnection extends Connection {
       throw new Error("connection is invalid type")
     }
   }
+
+  addConnectEventListener(l) {
+    return this.primaryConn.addConnectEventListener(l)
+  }
+
+  removeConnectEventListener(id) {
+    this.primaryConn.removeConnectEventListener(id)
+  }
+
+  addDisconnectEventListener(l) {
+    return this.primaryConn.addDisconnectEventListener(l)
+  }
+
+  removeDisconnectEventListener(id) {
+    return this.primaryConn.removeDisconnectEventListener(id)
+  }
+
 }
 export default PNConnection;

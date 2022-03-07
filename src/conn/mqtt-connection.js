@@ -19,7 +19,7 @@ class MQTTConnection extends AbstractConnection {
 
   _open() {
     if (this.mqttclient != null) {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
         this.waiters.push(resolve)
       })
     }
@@ -41,12 +41,19 @@ class MQTTConnection extends AbstractConnection {
             this.waiters.map((waiter) => waiter())
             this.waiters = []
           }
+          this._notifyConnectListener()
         }); 
         this.mqttclient.on("reconnect", ()=>{
+          this._notifyConnectListener()
           this.logger.info("mqtt connection reconnecting...");
         }); 
-        var onClose = (e)=>{
-          this.logger.warn("mqtt connection closed", e ? e : "");
+        var onClose = (packet)=>{
+          this._notifyDisconnectListener()
+          if (packet) {
+            this.logger.warn(`mqtt connection closed: '${packet.message}'`);
+          } else {
+            this.logger.warn(`mqtt connection closed`);
+          }
           this.isConnected = false;
         }
         this.mqttclient.on("message", (topic, message, packet)=>{
@@ -62,7 +69,7 @@ class MQTTConnection extends AbstractConnection {
         this.mqttclient.on("close", onClose)
         this.mqttclient.on("disconnect", onClose)
         this.mqttclient.on("error", (e) => {
-          this.logger.error("mqtt error detected", e);
+          this.logger.error(`mqtt error: message='${e.message}'`);
           if (isInit) {
             reject(e);
             isInit = false;
@@ -104,7 +111,7 @@ class MQTTConnection extends AbstractConnection {
     .then(()=>this.ensureConnected())
     .then(()=>{
       var responded = false;
-      return new Promise((res, rej)=>{
+      return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
         this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
         this.subscribers.push({
           subscriber, key, topicName, 

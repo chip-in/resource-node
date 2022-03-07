@@ -1,6 +1,6 @@
 import Cluster from './cluter';
 import Logger from '../../util/logger';
-import {URL, resolve} from 'url';
+import {resolve} from 'url';
 import AbortController from 'abort-controller';
 import AsyncLock from 'async-lock'
 import Connection from '../connection';
@@ -23,6 +23,9 @@ const CONSUL_SESSION_TTL = "30s";
 const CONSUL_SESSION_LOCK_DELAY_SECONDS = 10;
 const CONSUL_SESSION_RENEW_INTERVAL = 10 * 1000;
 const CONSUL_SESSION_RENEW_ERROR_THRESHOLD = 3;
+
+const RECONNECT_RETRY_TIMES = 10
+const RECONNECT_RETRY_INTERVAL = 10 * 1000
 
 var consulCommonLogger = new Logger("ConsulCommon");
 
@@ -67,16 +70,6 @@ const _appendQuery = (base, index)=> {
   return base + connector + "wait=" + CONSUL_BLOCKING_QUERY_TIMEOUT + "&index=" + index;
 }
 
-const _toURLObject = (baseConn)=> {
-  return new URL(baseConn.coreNodeURL);
-}
-
-const _replaceFQDN = (baseConn, targetFQDN)=> {
-  var urlObj = _toURLObject(baseConn);
-  urlObj.host = urlObj.hostname = targetFQDN;
-  return urlObj.href;
-}
-
 const _toHref = (conn, path)=> {
   if (path[0] === "/") {
     return resolve(conn.coreNodeURL, path);
@@ -112,18 +105,10 @@ class BlockingQueryInvoker {
     this.timerId = null;
   }
 
-  init() {
+  get() {
     return Promise.resolve()
-      .then(()=>this.lock.acquire(this.lockKey, ()=>{
-        if (this.initValue != null) {
-          return Promise.resolve(this.initValue);
-        }
-        return this._startQuery(this.index, true)
-          .then((body)=>{
-            this.initValue = body;
-            return body;
-          })
-      }))
+      .then(()=>this._startQuery())
+      .then(({body})=> body)
   }
 
   next(cb) {
@@ -137,46 +122,66 @@ class BlockingQueryInvoker {
         if (invoked) {
           return;
         }
-        return this._startQuery(this.index);
+        return this._startQuery(this.index)
+        .then(({index, body}) => {
+          if (body == null) {
+            // request is aborted
+            return
+          }
+          this.index = index;
+          this.cblist.map((cb)=>cb(body));
+          this.cblist = [];
+        })
+        .catch((e) => {
+          this.logger.warn("Failed to search next value", e)
+          return new Promise((resolve, reject)=> {
+            this.timerId = setTimeout(()=>{
+              this._startQuery(this.index)
+                    .then(resolve).catch(reject)
+            }, BLOCKINGQUERY_RETRY_INTERVAL);
+          })
+        })
       }))
   }
 
-  _startQuery(index, isInit) {
+  _startQuery(requestedIndex) {
     this.controller = new AbortController();
     return Promise.resolve()
-      .then(()=>_doGetOperation(this.conn, _appendQuery(this.path, index), this.controller))
+      .then(()=>_doGetOperation(this.conn, _appendQuery(this.path, requestedIndex), this.controller))
       .then((resp)=>{
         if (this.stopped) {
           throw new Error("blocking-query(" + this.path + ") has suspended")
         }
         var idx = resp.headers.get(CONSUL_INDEX_HEADER_NAME);
-        if (this.index == null) {
-          this.index = idx;
-          if (isInit) {
-            return resp.json();
-          }
-          return this._startQuery(this.index);
+        if (requestedIndex == null) {
+          return resp.json()
+            .then((body)=>{
+              return {
+                index: idx,
+                body
+              }
+            })
         }
-        if (this.index === idx) {
+        if (requestedIndex === idx) {
           //retry
-          this.logger.debug("blocking-query(" + this.path + ") index has not been changed:" + this.index + "=>" + idx)
-          return this._startQuery(this.index);
+          this.logger.debug("blocking-query(" + this.path + ") index has not been changed:" + requestedIndex + "=>" + idx)
+          return this._startQuery(requestedIndex);
         }
-        if (idx < this.index) {
+        if (idx < requestedIndex) {
           //Reset the index if it goes backwards. (https://www.consul.io/api-docs/features/blocking)
           // => reset and retry
-          this.logger.info("blocking-query(" + this.path + ") index has been reset:" + this.index + "=>" + idx)
+          this.logger.info("blocking-query(" + this.path + ") index has been reset:" + requestedIndex + "=>" + idx)
           // we treat it as changed
         } else {
-          this.logger.debug("blocking-query(" + this.path + ") index has been changed:" + this.index + "=>" + idx)
+          this.logger.debug("blocking-query(" + this.path + ") index has been changed:" + requestedIndex + "=>" + idx)
         }
         return resp.json()
           .then((body)=>{
             this.controller = null;
-            this.index = idx;
-            this.isRunning = false;
-            this.cblist.map((cb)=>cb(body));
-            this.cblist = [];
+            return {
+              index: idx,
+              body
+            }
           })
       })
       .catch((e)=>{
@@ -185,26 +190,18 @@ class BlockingQueryInvoker {
         }
         if (e.name === 'AbortError') {
           this.logger.info("blocking-query(" + this.path + ") was aborted by user's request")
-          return;
+          return {};
         }
         this.logger.warn("Failed to blocking-query(" + this.path + ")", e)
-        if (isInit) {
-          throw e;
-        }
         //retry after an interval
-        return new Promise((res, rej)=>{
-          this.timerId = setTimeout(()=>{
-            this._startQuery(this.index)
-              .then(res).catch(rej)
-          }, BLOCKINGQUERY_RETRY_INTERVAL);
-        })
+        throw e
       })
   }
   
   stop() {
     var ret = Promise.resolve();
     if (this.controller != null) {
-      ret = ret.then(new Promise((res, rej)=>{
+      ret = ret.then(new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
         this.controller.abort();
         this.finalizer = res;
       }))
@@ -221,18 +218,21 @@ class ConsulCluster extends Cluster{
 
   constructor(onMemberJoin, onMemberLeave, onInitialConnClosed, onLockExpired) {
     super(onMemberJoin, onMemberLeave, onInitialConnClosed, onLockExpired);
+    this.lockTimer = []
   }
 
   _initialize(initConn) {
+    this.logger.info("Try to initialize cluster");
     return Promise.resolve()
       .then(()=>this._getInitialConnectionKey(initConn))
       .then((initialConnectionKey)=>{
+        this.logger.info(`Initialize cluster with key(${initialConnectionKey})`);
         this.initialConnectionKey = initialConnectionKey;
         this.initialConnection = this.toConnObject(initialConnectionKey, initConn);
         return Promise.resolve()
           .then(()=>{
             this.memberQueryInvoker = new BlockingQueryInvoker(initConn, API_PATH_TO_RESOLVE_MEMBERS)
-            return this.memberQueryInvoker.init();
+            return this.memberQueryInvoker.get();
           })
           .then((body)=>this._parseMembers(body))
           .then((members)=>{
@@ -291,21 +291,24 @@ class ConsulCluster extends Cluster{
     if (removed.length === 0) {
       return ret;
     }
-    var leaveFunc = (c)=>Promise.resolve(this.onMemberLeave(c));
-    var initConnLeaveFunc = (c)=>Promise.resolve(this.onInitialConnClosed(c));
-
     for (var i = 0; i < removed.length; i++) {
       var target = removed[i];
       if (target.nodeKey === this.initialConnection.nodeKey) {
         this.logger.warn("Leave event fired and it is for initial connection. nodeKey:" + target.nodeKey);
-        ret = ret.then(initConnLeaveFunc(this.getInitConnection()))
+        ret = ret.then(() => {
+          return Promise.resolve(this.onInitialConnClosed(this.getInitConnection()))
+        })
         
       } else {
         for (var j = 0; j < this.coreNodeConnections.length; j++) {
           if (target.nodeKey === this.coreNodeConnections[j].nodeKey) {
             this.logger.warn("Leave event fired. nodeKey:" + target.nodeKey);
-            ret = ret.then(leaveFunc(this.coreNodeConnections[j].conn))
-            this.coreNodeConnections.splice(j, 1);
+            ret = ret.then(((c, idx)=> {
+              return () => {
+                return Promise.resolve(this.onMemberLeave(c))
+                  .then(() => this.coreNodeConnections.splice(idx, 1))
+              }
+            })(this.coreNodeConnections[j].conn, j))
             break;
           }
         }
@@ -319,15 +322,23 @@ class ConsulCluster extends Cluster{
     if (added.length === 0) {
       return ret;
     }
-    var joinFunc = (k,c)=>Promise.resolve(this.onMemberJoin(c).then(()=>this.coreNodeConnections.push(this.toConnObject(k,c))));
     for (var i = 0; i < added.length; i++) {
       var target = added[i];
       if (target.nodeKey === this.initialConnection.nodeKey) {
         this.logger.warn("Join event fired and it is for initial connection. nodeKey:" + target.nodeKey);
-        ret = ret.then(Promise.resolve(this.onMemberJoin(this.getInitConnection())))
+        ret = ret.then(() => {
+          const c = this.getInitConnection()
+          return Promise.resolve(this.onMemberJoin(c))
+        })
       } else {
         this.logger.warn("Join event fired. nodeKey:" + target.nodeKey);
-        ret = ret.then((joinFunc(target.nodeKey, this._createConnection(target.nodeKey, this.getInitConnection()))))
+        ret = ret.then((k=> {
+          return () => {
+            const c = this._createConnection(k, this.getInitConnection())
+            return Promise.resolve(this.onMemberJoin(c))
+              .then((()=>this.coreNodeConnections.push(this.toConnObject(k,c))))
+          }
+        })(target.nodeKey))
       }
     }
     return ret;
@@ -362,13 +373,10 @@ class ConsulCluster extends Cluster{
       })
   }
 
-  _finalize() {
+  _finalize(closeAll) {
     var ret = Promise.resolve()
     if (this.memberQueryInvoker != null) {
       ret = ret.then(()=>this.memberQueryInvoker.stop())
-    }
-    if (this.keyQueryInvoker != null) {
-      ret = ret.then(()=>this.keyQueryInvoker.stop())
     }
     if (this.sessionId != null) {
       ret = ret.then(()=>_doPutOperation(this.getInitConnection(), API_PATH_TO_DELETE_SESSION.replace(":id", this.sessionId)))
@@ -381,24 +389,32 @@ class ConsulCluster extends Cluster{
         this.sessionId = null
       })
     }
-    if (this.renewTimerId != null) {
-      clearTimeout(this.renewTimerId);
-      this.renewTimerId = null;
+    if (closeAll) {
+      ret = ret.then(()=>this.waterfall((c)=>c.close()))
+        .then(()=>this.logger.info("Succeeded to close all connections"))
+        .catch((e) => {
+          this.logger.error("Failed to close connection", e)
+          //IGNORE
+        })
     }
-    if (this.lockTimer != null) {
-      clearTimeout(this.lockTimer);
-      this.lockTimer = null;
-    }
+    ret = ret.then(()=> {
+      //cleanup
+      this._stopRenewTimer()
+      this._stopLockTimer()
+      this.initialConnectionKey = null
+      this.initialConnection = null
+      this.coreNodeConnections = []
+    })
     return ret
   }
 
-  _acquireLock(key) {
+  _acquireLock(key, oneshot) {
     if (this.sessionId == null) {
       if (this.isSessionInitializing) {
         this.logger.info("Create session process is running."); 
         return new Promise((resolve, reject) => {
           this.sessionIdWaiters.push(() => {
-            return this._acquireLock(key)
+            return this._acquireLock(key, oneshot)
             .then(resolve)
             .catch(reject)
           })
@@ -408,7 +424,7 @@ class ConsulCluster extends Cluster{
       this.isSessionInitializing = true
       this.sessionIdWaiters = []
       return this._createSession()
-        .then(()=>this._acquireLock(key))
+        .then(()=>this._acquireLock(key, oneshot))
         .then(()=> {
           this.isSessionInitializing = false
           var waiters = this.sessionIdWaiters
@@ -416,34 +432,45 @@ class ConsulCluster extends Cluster{
           waiters.map((waiter) => waiter())
         })
         .catch((e) => {
-          this.logger.error("Failed to acquire lock. ", e); 
+          this.logger.error(`Failed to acquire consul lock (${key})`, e);
           this.isSessionInitializing = false
           var waiters = this.sessionIdWaiters
           this.sessionIdWaiters = []
           waiters.map((waiter) => waiter())
+          if (this.isAcquiringCancelError(e)) {
+            throw e
+          }
           // retry
-          return this._acquireLock(key)
+          return this._acquireLock(key, oneshot)
         })
     }
     var regKey = this._createKVSKey(key)
-    var path = API_PATH_TO_LOCK.replace(":key", regKey).replace(":sessionId", this.sessionId);
-    var lockArgs = [this.getInitConnection(), path, {sessionId : this.sessionId}]
+    // var path = API_PATH_TO_LOCK.replace(":key", regKey).replace(":sessionId", this.sessionId);
+    // var lockArgs = [this.getInitConnection(), path, {sessionId : this.sessionId}]
     return Promise.resolve()
-      .then(()=>_doPutOperation(...lockArgs))
+      .then(()=>_doPutOperation(this.getInitConnection(),
+        API_PATH_TO_LOCK.replace(":key", regKey).replace(":sessionId", this.sessionId), {sessionId : this.sessionId}))
       .then((ret)=>{
         if (ret) {
           this.logger.info("Succeeded to acquire lock. SessionId:" + this.sessionId + ", key:" + regKey); 
           return;
         }
+        if (oneshot) {
+          throw new Error(`Failed to acquire lock for key '${key}'(${regKey}).`)
+        }
         //fail(1st) => retry after lock-delay seconds
         this.logger.warn("Failed to acquire lock. We retry to acquire lock after " + CONSUL_SESSION_LOCK_DELAY_SECONDS + " seonds. SessionId:" + this.sessionId + ", key:" + regKey);
-        return new Promise((res, rej)=>{
-          this.lockTimer = setTimeout(()=>{
-            this.lockTimer = null;
-            res();
+        return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
+          let timerId = setTimeout(()=>{
+            this.lockTimer = this.lockTimer.filter(obj => obj.timerId != timerId)
+            this._acquireLock(key, oneshot)
+            .then(res)
+            .catch(rej)
           }, CONSUL_SESSION_LOCK_DELAY_SECONDS * 1000)
+          this.lockTimer.push({timerId, onCanceled: () => {
+            rej(new Error(this.getAcquiringCancelMessage()))
+          }})
         })
-        .then(()=> this._acquireLock(key))
       })
   }
 
@@ -485,49 +512,167 @@ class ConsulCluster extends Cluster{
         this.renewErrorCount = 0;
         this.logger.info("Succeeded to create session. SessionId:" + this.sessionId );
       })
-      .then(()=>{
-        const handleRenewError = ()=>{
-          this.renewErrorCount++;
-          if (this.renewErrorCount >= CONSUL_SESSION_RENEW_ERROR_THRESHOLD) {
-            this.logger.error("Failed to renew session. Error count exceed threshold. Stop renew process.")
-            return Promise.resolve()
-              .then(()=>{
-                this.sessionId = null;
-                return Promise.resolve(this.onLockExpired())
-              })
-          }
-          this.renewTimerId = setTimeout(()=>doRenew(), CONSUL_SESSION_RENEW_INTERVAL)
-        }
-        var doRenew = ()=>{
-          return Promise.resolve()
-          .then(()=>{
-            if (this.sessionId == null) {
-              this.logger.warn("sessionId was lost. Stop renew process.")
-              this.renewErrorCount = 0;
-              return Promise.resolve();
-            }
-            return _doPutOperation(this.getInitConnection(), API_PATH_TO_RENEW_SESSION.replace(":id", this.sessionId))
-            .then((body)=>{
-              if (body == null || body[0] == null) {
-                this.logger.error("Failed to renew session. Body is empty.")
-                handleRenewError();
-                return;
-              }
-              this.logger.debug("Succeeded to renew session. SessionId:" + this.sessionId );
-              this.renewErrorCount = 0;
-              //next
-              this.renewTimerId = setTimeout(()=>doRenew(), CONSUL_SESSION_RENEW_INTERVAL);
-            })
-            .catch((e)=>{
-              this.logger.error("Failed to renew session. Error detected", e)
-              handleRenewError();
-              return;
-            })
-          })
-        }
-        this.renewTimerId = setTimeout(()=>doRenew(), CONSUL_SESSION_RENEW_INTERVAL);
-      })
+      .then(()=>this._setRenewTimer())
   }
+
+  _handleRenewError() {
+    this.renewErrorCount++;
+    if (this.renewErrorCount >= CONSUL_SESSION_RENEW_ERROR_THRESHOLD) {
+      this.logger.error("Failed to renew session. Error count exceed threshold. Stop renew process.")
+      return Promise.resolve()
+        .then(()=>{
+          this.sessionId = null;
+          return Promise.resolve(this.onLockExpired())
+        })
+    }
+    this._setRenewTimer()
+  }
+
+  _setRenewTimer() {
+    this.renewTimerId = setTimeout(()=>this._doRenew(), CONSUL_SESSION_RENEW_INTERVAL)
+  }
+
+  _doRenew() {
+    return Promise.resolve()
+    .then(()=>{
+      if (this.sessionId == null) {
+        this.logger.warn("sessionId was lost. Stop renew process.")
+        this.renewErrorCount = 0;
+        return Promise.resolve();
+      }
+      return _doPutOperation(this.getInitConnection(), API_PATH_TO_RENEW_SESSION.replace(":id", this.sessionId))
+      .then((body)=>{
+        if (body == null || body[0] == null) {
+          this.logger.error("Failed to renew session. Body is empty.")
+          this._handleRenewError();
+          return;
+        }
+        this.logger.debug("Succeeded to renew session. SessionId:" + this.sessionId );
+        this.renewErrorCount = 0;
+        //next
+        this._setRenewTimer()
+      })
+      .catch((e)=>{
+        this.logger.error(`Failed to renew session. Error detected: message='${e.message}', name=${e.name}`);
+        this._handleRenewError();
+        return;
+      })
+    })
+  }
+  
+  _stopWathingMemberChanges() {
+    return Promise.resolve()
+    .then(()=> {
+      if (this.memberQueryInvoker != null) {
+        return this.memberQueryInvoker.stop()
+      }
+    })
+  }
+
+  _stopLockTimer() {
+    this.lockTimer.map((obj)=>{
+      clearTimeout(obj.timerId)
+      obj.onCanceled()
+    })
+    this.lockTimer = []
+  }
+
+  _stopRenewTimer() {
+    if (this.renewTimerId != null) {
+      clearTimeout(this.renewTimerId)
+    }
+    this.renewTimerId = null
+  }
+
+  _suspend() {
+    return Promise.resolve()
+    .then(()=>this._stopWathingMemberChanges())
+    .then(()=>{
+      this._stopRenewTimer()
+      this._stopLockTimer()
+    })
+  }
+
+  _checkSessionId(sessionId) {
+    return Promise.resolve()
+    .then(()=> _doPutOperation(this.getInitConnection(), API_PATH_TO_RENEW_SESSION.replace(":id", sessionId)))
+    .then((body)=> {
+      if (body == null || body[0] == null) {
+        this.logger.info(`Failed to renew session. SessionId is invalid(${sessionId})`)
+        return false
+      }
+      this.logger.info(`Succeeded to renew session. SessionId is valid(${sessionId})`)
+      return true
+    }).catch((e) => {
+      this.logger.info(`Failed to renew session. SessionId is invalid(${sessionId})`, e)
+      return false
+    })
+  }
+
+  _resume() {
+    return Promise.resolve()
+    .then(()=> {
+      if (this.memberQueryInvoker == null) {
+        throw new Error("AssertionError: Resume is invoked but queryInvoker is not initialized")
+      }
+      //get members
+      const getMembers = (i) => {
+        return Promise.resolve()
+        .then(()=>this.memberQueryInvoker.get())
+        .catch((e)=> {
+          this.logger.warn("Failed to get members", e)
+          if (i+1 >= RECONNECT_RETRY_TIMES) {
+            return null
+          }
+          return new Promise((resolve, reject)=> {
+            setTimeout(()=>{
+              getMembers(i+1).then(resolve).catch(reject)
+            }, RECONNECT_RETRY_INTERVAL)
+          })
+        })
+      }
+      return getMembers(0)
+      .then((queryResult)=> {
+        if (queryResult == null) {
+          throw new Error("Failed to get consul-member")
+        }
+        //check initialConn exists in consul member
+        const members = this._parseMembers(queryResult)
+        this.logger.info(`Resume cluster: Succeeded to find consul members: ${JSON.stringify(members)}`);
+        const initConnExists = members.filter((m)=>m.nodeKey === this.initialConnectionKey).length > 0
+        if (!initConnExists) {
+          throw new Error("InitialConnection doesn't exist in consul-member")
+        }
+        this.logger.info(`Resume cluster: Initial connection(${this.initialConnectionKey}) exists in members`);
+
+        //check sessionId is alive
+        if (this.sessionId != null) {
+          this.logger.info(`Resume cluster: sessionId is ${this.sessionId}, check sessionId is valid`);
+          return this._checkSessionId(this.sessionId)
+          .then((isSessionAlive)=> {
+            if (isSessionAlive) {
+              this.logger.info(`Resume cluster: Set renew timer`);
+              this._setRenewTimer()
+            } else {
+              return this._createSession()
+              .then(()=> {
+                return Object.keys(this.lockedKey).reduce((promise, key)=> {
+                  return promise.then(()=>this._acquireLock(key, true))
+                }, Promise.resolve())
+              })
+            }
+          })
+        } else {
+          this.logger.info(`Resume cluster: sessionId is null`);
+        }
+      })
+    }).catch((e) => {
+      this.logger.error("Failed to resume consul cluster", e)
+      throw e
+
+    })
+  }
+
 }
 
 export default ConsulCluster

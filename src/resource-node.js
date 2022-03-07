@@ -90,11 +90,11 @@ class ResourceNode {
      @example
 node.start()
   .then(() => {
-    //　起動完了後の処理
+    // 起動完了後の処理
     console.log("リソースノードの起動が完了しました。");
   })
   .catch((err) => {
-    //　起動失敗後の処理
+    // 起動失敗後の処理
     console.log("リソースノードの起動中にエラーが発生しました。");
   })
 });
@@ -129,11 +129,11 @@ node.start()
      @example
 node.stop()
   .then(() => {
-    //　停止完了後の処理
+    // 停止完了後の処理
     console.log("リソースノードの停止が完了しました。");
   })
   .catch((err) => {
-    //　停止失敗後の処理
+    // 停止失敗後の処理
     console.log("リソースノードの停止中にエラーが発生しました。");
   })
 });
@@ -384,7 +384,7 @@ rnode.start()
    * @return {object} コンテキストオブジェクト
    */
   getContext() {
-    return Object.assign({}, this.ctx);;
+    return Object.assign({}, this.ctx);
   }
 
   /**
@@ -534,7 +534,7 @@ rnode.start()
       if (typeof navigator === "undefined" || typeof navigator.geolocation === "undefined" || typeof navigator.geolocation.getCurrentPosition !== "function") {
         return;
       }
-      return new Promise((resolve, reject)=>{
+      return new Promise((resolve, reject)=>{/*eslint-disable-line no-unused-vars*/
         navigator.geolocation.getCurrentPosition((pos)=>{
           //convert Position object to native object
           ret[this.contextNamespace + "currentPosition"] = {
@@ -746,7 +746,7 @@ rnode.start()
     .then(()=>this.conn.unsubscribeAll())
   }
   
-  _localMount(path, mode, proxy, option) {
+  _localMount(path, mode, proxy, option) {/*eslint-disable-line no-unused-vars*/
     var handle = uuidv4();
     return Promise.resolve()
       .then(()=>{

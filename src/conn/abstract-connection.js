@@ -1,7 +1,9 @@
 import Logger from '../util/logger';
 import AsyncLock from 'async-lock'
+import uuidv4 from 'uuid/v4';
 
-const SEMAPHORE_KEY_NAME = "instance-level-lock";
+const SEMAPHORE_KEY_NAME = "instance-level-connection-lock";
+const SUSPEND_ERROR_MESSAGE = "Connection temporarily disabled"
 
 class ConnectionLogger extends Logger{
   constructor(category, coreNodeURL, basePath) {
@@ -41,11 +43,16 @@ class AbstractConnection {
     this.isConnecting = false;
     this.waiters = [];
     this.lock = new AsyncLock();
+
+    this.connectEventListeners = {}
+    this.disconnectEventListeners = {}
+
+    this.suspened = false
   }
 
   ensureConnected() {
     return Promise.resolve()
-      .then(()=>this.lock.acquire(SEMAPHORE_KEY_NAME, ()=>{
+      .then(()=>this.lock.acquire(this._getConnectionLockKey(), ()=>{
         if (this.isConnected) {
           return;
         }
@@ -62,7 +69,7 @@ class AbstractConnection {
   open() {
     this.logger.info("Try to open connection")
     return Promise.resolve()
-      .then(()=>this.lock.acquire(SEMAPHORE_KEY_NAME, ()=>{
+      .then(()=>this.lock.acquire(this._getConnectionLockKey(), ()=>{
         if (this.isConnected) {
           return Promise.resolve();
         }
@@ -83,13 +90,13 @@ class AbstractConnection {
   close() {
     this.logger.info("Try to close connection")
     return Promise.resolve()
-      .then(()=>this.lock.acquire(SEMAPHORE_KEY_NAME, ()=>{
+      .then(()=>this.lock.acquire(this._getConnectionLockKey(), ()=>{
         if (!this.isConnected) {
           return Promise.resolve();
         }
         return Promise.resolve()
           .then(()=>this._close())
-          .then(()=>this.isConnected = false);
+          .then(()=>this.isConnected = false)
       }))
       .catch((e) => {
         this.logger.error("Failed to close connection", e)
@@ -121,6 +128,69 @@ class AbstractConnection {
 
   _getConnectionLockKey() {
     return SEMAPHORE_KEY_NAME;
+  }
+
+  addConnectEventListener(listener) {
+    return this._addListener(this.connectEventListeners, listener)
+  }
+
+  removeConnectEventListener(listenerId) {
+    this._removeListener(this.connectEventListeners, listenerId)
+  }
+
+  addDisconnectEventListener(listener) {
+    return this._addListener(this.disconnectEventListeners, listener)
+  }
+
+  removeDisconnectEventListener(listenerId) {
+    this._removeListener(this.disconnectEventListeners, listenerId)
+  }
+
+  _addListener(dst, listener) {
+    var listenerId = uuidv4();
+    dst[listenerId] = listener
+    return listenerId
+  }
+
+  _removeListener(dst, id) {
+    delete dst[id]
+  }
+
+  _notifyConnectListener() {
+    return this._notifyListener(this.connectEventListeners)
+  }
+
+  _notifyDisconnectListener() {
+    return this._notifyListener(this.disconnectEventListeners)
+  }
+
+  _notifyListener(targets) {
+    if (targets != null && typeof targets === "object") {
+      return Object.values(targets).reduce((promise, listener) => {
+        return promise.then(()=>listener())
+        .catch((e)=> this.logger.warn("Failed to execute listener", e))
+      }, Promise.resolve())
+    }
+    return Promise.resolve()
+  }
+
+  copyListenerTo(target) {
+    target.connectEventListeners = this.connectEventListeners
+    target.disconnectEventListeners = this.disconnectEventListeners
+  }
+
+  setSuspended(suspend) {
+    this.suspened = suspend
+  }
+
+  raiseSuspended() {
+    if(this.suspened) {
+      throw new Error(SUSPEND_ERROR_MESSAGE)
+    }
+  }
+
+  isSuspendError(e) {
+    return e instanceof Error && e.message === SUSPEND_ERROR_MESSAGE
   }
 }
 

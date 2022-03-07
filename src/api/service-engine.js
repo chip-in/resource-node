@@ -8,7 +8,7 @@ class ServiceEngine {
    * @desc コンストラクタ
    * @param {object} [option] コアノードに登録された構成情報
    */
-  constructor(option) {
+  constructor(option) {/*eslint-disable-line no-unused-vars*/
     this.logger = new Logger(this.constructor.name);
   }
 
@@ -31,7 +31,7 @@ export default class WebUiEngine extends ServiceEngine {
 }
    *
    */
-  start(node) {
+  start(node) {/*eslint-disable-line no-unused-vars*/
     return Promise.resolve();
   }
 
@@ -55,7 +55,7 @@ export default class WebUiEngine extends ServiceEngine {
 }
    *
    */
-  stop(node) {
+  stop(node) {/*eslint-disable-line no-unused-vars*/
     return Promise.resolve();
   }
 

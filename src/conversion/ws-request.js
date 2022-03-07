@@ -1,4 +1,3 @@
-import EventEmitter from 'events'
 import toStream from 'string-to-stream'
 
 var isRawFormat = (body) => {
@@ -30,12 +29,12 @@ export default class WSRequest {
     this.stream = toStream(input);
     this.stream.on("close", ()=>{
       if (this.timeoutId) {
-        clearTimeout(timeoutId);
+        clearTimeout(this.timeoutId);
       }
     })
   }
 
-  on(evt) {
+  on(evt) {/*eslint-disable-line no-unused-vars*/
     //delegate
     this.stream.on.apply(this.stream, Array.prototype.slice.call(arguments));
   }

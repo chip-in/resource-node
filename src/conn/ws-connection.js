@@ -10,16 +10,6 @@ const webSocketSkipCompress = process.env.CNODE_WSOCKET_SKIP_COMPRESS ? true : f
 const webSocketSkipCompressMaxSize = process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE ? 
   parseInt(process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE, 10) : 10 * 1024 * 1024
 
-const perMessageDeflate = {
-  zlibDeflateOptions : {
-    level: 1 /* zlib.constants.Z_BEST_SPEED */,
-    chunkSize : 1 * 1024 * 1024
-  },
-  zlibInflateOptions : {
-    chunkSize : 1 * 1024 * 1024
-  }
-}
-
 class WSConnection extends AbstractConnection {
 
   constructor(coreNodeURL, basePath, userId, password, token, handlers) {
@@ -30,116 +20,207 @@ class WSConnection extends AbstractConnection {
     this._initMountMap();
     this.proxies = {};
     this.waiters = []
+
+    this.socketioStatus = null
   }
 
   _open(){
+    if (this.denySocketProcess) {
+      throw new Error("Can't use socket from disconnect listener")
+    }
     if (this.socket != null) {
-      this.logger.warn("wait for reconnect");
-      return new Promise((resolve, reject) => {
-        this.logger.warn("notified reconnecting");
+      if (this.isConnected) {
+        //already opened
+        return Promise.resolve()
+      }
+      if (this.socketioStatus === "connect") {
+        this.logger.info("connection has already connected but initializing process has not completed");
+      } else {
+        this.logger.warn("wait for reconnect");
+      }
+      return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
+        this.logger.warn("notified (re)connecting + registering");
         this.waiters.push(resolve)
       })
     }
     var isRespond = false;
     return Promise.resolve()
     .then(()=>{
-      return new Promise((res, rej)=>{
+      return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
         var initSocket = ()=>{
-          this.logger.warn("Start to open websocket connection for core-node");
+          this.logger.warn(`Start to open websocket connection for core-node`);
           var s = ioClient(this.coreNodeURL,{
             path : this.basePath + webSocketPath,
             extraHeaders : this.createAuthorizationHeaders(this.userId, this.password, this.token),
             forceNew : true
           });
+          const setStatusToConnect = () =>{
+            this.socketioStatus = "connect"
+            this.denySocketProcess = false
+          }
+          const setStatusToDisconnect = (reason) => {
+            this.socketioStatus = "disconnect"
+            this.isConnected = false;
+            if (reason === "io client disconnect") {
+              //Disable using socket from disconnect listener when client is shutting down
+              this.denySocketProcess = true
+            }
+            if (this.registerTimerId != null) {
+              clearTimeout(this.registerTimerId)
+              this.registerTimerId = null
+            }
+          }
+          const setStatusToConnectError = () => {
+            this.socketioStatus = "connect_error"
+          }
           s.on('connect', ()=>{
-            this.logger.warn("connected to core-node via websocket");
+            this.logger.warn(`connected to core-node via websocket`);
+            setStatusToConnect()
+
             //start clustering
-            if (this.isRegistering) {
-              this.logger.warn("currently registering. we skip it");
-              return
-            }
-            if (this.isRegistered) {
-              this.logger.warn("node has already registered. we skip it");
-              return
-            }
             var doRegister = () => {
-              this.isRegistering = true
+              if (this.registerTimerId != null) {
+                //Deny duplicated
+                this.logger.info(`Clear register timer`);
+                clearTimeout(this.registerTimerId)
+                this.registerTimerId = null
+              }
               this.register()
                 .then(()=>{
-                  this.isRegistering = false
-                  this.isRegistered = true
+                if (this.socketioStatus !== "connect") {
+                  throw new Error("Succeeded to register node but socket has already closed")
+                }
+                this.isConnected = true
+
+                // invoke connect handlers
+                this._notifyConnectListener()
+                .then(()=> {
                   if (this.handlers.onConnect) {
-                    this.handlers.onConnect();
+                    try {
+                      this.handlers.onConnect();
+                    } catch (e) {
+                      this.logger.warn(`Exception occured at onConnect handler.`, e);
+                    }
                   }
                   var mountListeners = this.eventListenerForMount["connect"];
                   for (var k in mountListeners) {
-                    mountListeners[k].map((f)=>f())
+                    try {
+                      mountListeners[k].map((f)=>f())
+                    } catch (e) {
+                      this.logger.warn(`Exception occured at onConnect mountListeners.`, e);
+                    }
                   }
+
                   if (!isRespond) {
                     isRespond = true;
                     res();
                   }
+
                   if (this.waiters.length > 0) {
                     this.waiters.map((waiter) => waiter())
                     this.waiters = []
                   }
                 })
-                .catch((e) => {
-                  this.logger.warn("Failed to register node", e);
-                  this.isRegistering = false
-                  // if (this.isRegistered) {
-                  //   setTimeout(() => {
-                  //     doRegister()
-                  //   }, 30 * 1000)
-                  // }
-                })
+              }).catch((e)=> {
+                this.logger.warn("Failed to register node", e);
+                if (this.socketioStatus === "connect") {
+                  if (this.registerTimerId == null) {
+                    this.logger.info(`Register timer is set`);
+                    this.registerTimerId = setTimeout(() => {
+                      this.registerTimerId = null
+                      doRegister()
+                    }, 30 * 1000 )
+                  } else {
+                    this.logger.info(`Register timer is already set.`);
+                  }
+                } else {
+                  this.logger.info(`Register timer is not set because current socket status is not 'conneect' ('${this.socketioStatus}').`);
+                }
+              })
             }
             doRegister()
           });
-          s.on('reconnect', ()=>{
-            this.logger.warn("reconnected to core-node via websocket");
-            this.isConnected = true;
-          })
-          s.on('disconnect', (reason)=>{
-            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}`);
-            if (this.handlers.onDisconnect) {
-              this.handlers.onDisconnect();
+          const doDisconnect = (reason) => {
+            this._notifyDisconnectListener()
+            .then(() => {
+
+              //abort session
+              var sessions = this.sessionTable
+              this.sessionTable = {}
+              for (var id in sessions) {
+                var session = sessions[id];
+                this.logger.warn(`Try to abort session:${id}`);
+                try {
+                  session.end(Object.assign({}, session.req, {m:{
+                    rc: 999
+                  }}))
+                  this.logger.info(`Succeeded to abort session:${id}`);
+                } catch (e) {
+                  this.logger.warn(`Failed to abort session:${id}`, e);
+                  //IGNORE
+                }
+              }
+              //invoke disconnect handlers
+              var mountListeners = this.eventListenerForMount["disconnect"];
+              for (var k in mountListeners) {
+                try {
+                  mountListeners[k].map((f)=>f())
+                } catch (e) {
+                  this.logger.warn(`Exception occured at onDisconnect mountListeners.`, e);
+                }
+              }
+
+              if (this.handlers.onDisconnect) {
+                try {
+                  this.handlers.onDisconnect();
+                } catch (e) {
+                  this.logger.warn(`Exception occured at onDisconnect handler.`, e);
+                }
+              }
+
+              //io-client gives up retrying when server disconnected
+              if (reason === "io server disconnect") {
+                this.socket.connect()
+              }
+            })
+          }
+          s.on('disconnect', (r)=>{
+            this.logger.warn(`disconnected to core-node via websocket. Reason:${r}`);
+            let promise = Promise.resolve()
+            let currentStatus = this.socketioStatus
+            promise.then(()=>setStatusToDisconnect(r))
+            if (currentStatus === "connect") {
+              promise = promise.then(()=>doDisconnect(r))
+            } else {
+              this.logger.info(`Current socketioStatus = ${currentStatus}, we skip disconnect handler and set status to 'disconnect'`);
             }
-            var mountListeners = this.eventListenerForMount["disconnect"];
-            for (var k in mountListeners) {
-              mountListeners[k].map((f)=>f())
-            }
-            if (reason === "io server disconnect") {
-              this.socket.connect()
-            }
-            this.isRegistered = false
           });
+          s.on('connect_error', (e)=>{
+            this.logger.error(`Connection error: message='${e.message}', name=${e.name}`);
+            let promise = Promise.resolve()
+            if (this.socketioStatus === "connect") {
+              //skip disconnect event
+              this.logger.warn(`Current socketioStatus = ${this.socketioStatus}, disconnect event may be skipped. We execute disconnect handler`);
+              promise = promise.then(()=>doDisconnect("connect_error"))
+            }
+            promise.then(()=>setStatusToConnectError())
+          })
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg);
           });
-          s.on('error', (e)=>{
-            this.logger.error("error:", e);
-            if (this.isRegistering) {
-              this.isRegistering = false
-            }
-            var sessions = this.sessionTable
-            this.sessionTable = {}
-            for (var id in sessions) {
-              var session = sessions[id];
-              this.logger.warn(`Try to close session:${id}`);
-              try {
-                session.end(Object.assign({}, session.req, {m:{
-                  rc: 999
-                }}))
-                this.logger.info(`Succeeded to close session:${id}`);
-              } catch (e) {
-                this.logger.warn(`Failed to close session:${id}`, e);
-                //IGNORE
-              }
-            }
+          // Manager events
+          // https://socket.io/docs/v3/migrating-from-2-x-to-3-0/#the-socket-instance-will-no-longer-forward-the-events-emitted-by-its-manager
+          s.io.on('reconnect', (attempt)=>{
+            this.logger.info(`WS Manager.reconnect(attempt:${attempt})`);
           })
-          s.on('connect_error', (e)=>{
-            this.logger.error("Connection error:", e);
+          s.io.on('reconnect_error', (e)=>{
+            this.logger.error(`Manager.reconnect_error: message='${e.message}', name=${e.name}`);
+          })
+          s.io.on('reconnect_failed', ()=>{
+            this.logger.error(`WS Manager.reconnect_failed`);
+          })
+          s.io.on('error', (e)=>{
+            this.logger.error(`Manager.error: message='${e.message}', name=${e.name}`);
           })
           return s;
         }
@@ -257,7 +338,7 @@ class WSConnection extends AbstractConnection {
             this.logger.warn("Node has been already registered(request may be duplicated)");
           } else {
             this._checkResponse(resp, "register", "registerResponse");
-            this.logger.info("Succeeded to register cluster");
+            this.logger.info(`Succeeded to register cluster(${uuid})`);
           }
           this.nodeId = uuid;
           this.userInfo = resp.u || {};
@@ -279,14 +360,14 @@ class WSConnection extends AbstractConnection {
             } catch (e) {
               //IGNORE
             }
-            this.logger.info("Succeeded to unregister cluster");
+            this.logger.info(`Succeeded to unregister cluster(${this.nodeId}`);
             return Promise.resolve();
           });
       })
   }
 
   ask(msg) {
-    return new Promise((resolve, reject)=>{
+    return new Promise((resolve, reject)=>{/*eslint-disable-line no-unused-vars*/
       this.sessionTable[msg.i] = {
         end : (resp)=>{
           resolve(resp);
@@ -302,7 +383,12 @@ class WSConnection extends AbstractConnection {
   send(msg) {
     const compressOpt = (msg.o && msg.o.skipCompress) ? false : true
     return Promise.resolve()
-      .then(()=>this.socket.compress(compressOpt).emit(webSocketMsgName, msg));
+      .then(()=>{
+        if (this.socket == null || !this.socket.connected) {
+          throw new Error("Socket closed")
+        }
+        this.socket.compress(compressOpt).emit(webSocketMsgName, msg)
+      });
   }
   
   _close() {
