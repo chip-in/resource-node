@@ -94,7 +94,7 @@ export default class WSResponse {
       if (typeof cb === "function") cb();
     }, ms);
   }
-  write(chunk, encoding, cb) {
+  write(chunk, encoding, cb) {/*eslint-disable-line no-unused-vars*/
     if (typeof encoding === "function") {
       cb = encoding; /*eslint-disable-line no-unused-vars*/
       encoding = null;
