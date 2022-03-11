@@ -18,20 +18,42 @@ class MQTTConnection extends AbstractConnection {
   }
 
   _open() {
-    if (this.mqttclient != null) {
-      return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
-        this.waiters.push(resolve)
-      })
-    }
     return Promise.resolve()
     .then(()=>{
       var mqttUrl = this._createMQTTUrl();
       var mqttConnectOption = this._createMQTTConnectOption();
       return new Promise((resolve, reject)=>{
+        if (this.mqttclient != null) {
+          if (this.invokedMqttClose) {
+            this.logger.warn("reopen mqtt connection");
+            try {
+              this.mqttclient.end(true)
+            } catch (e) {
+              this.logger.warn("Failed to close previous mqtt connection");
+            }
+            this.invokedMqttClose = false
+          } else {
+            return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
+              this.waiters.push(resolve)
+            })
+          }
+        }
         var isInit = true;
         this.mqttclient = mqtt.connect(mqttUrl, mqttConnectOption);
         this.mqttclient.on("connect", ()=>{
           this.logger.info("mqtt connection connected");
+
+          // XXX This code may not be needed
+          if (this.invokedMqttClose) {
+            this.logger.warn("connection event for closed-connection. We close it.");
+            try {
+              this.mqttclient.end(true)
+            } catch (e) {
+              this.logger.warn("Failed to close previous mqtt connection");
+            }
+            return
+          }
+
           this.isConnected = true;
           if (isInit) {
             resolve();
@@ -54,7 +76,6 @@ class MQTTConnection extends AbstractConnection {
           } else {
             this.logger.warn(`mqtt connection closed`);
           }
-          this.isConnected = false;
         }
         this.mqttclient.on("message", (topic, message, packet)=>{
           const isRetain = packet.retain;
@@ -81,6 +102,7 @@ class MQTTConnection extends AbstractConnection {
   _close() {
     return Promise.resolve()
     .then(()=>this.mqttclient != null ? this.mqttclient.end() : Promise.resolve())
+    .then(()=>this.invokedMqttClose = true)
   }
 
   publish(topicName, message) {

@@ -135,10 +135,17 @@ class BlockingQueryInvoker {
         .catch((e) => {
           this.logger.warn("Failed to search next value", e)
           return new Promise((resolve, reject)=> {
-            this.timerId = setTimeout(()=>{
+            let timerId = setTimeout(()=>{
+              this.blockingTimerObj = null
               this._startQuery(this.index)
                     .then(resolve).catch(reject)
             }, BLOCKINGQUERY_RETRY_INTERVAL);
+            this.blockingTimerObj = {
+              timerId,
+              onCanceled: () => {
+                reject(new Error("abort error"))
+              }
+            }
           })
         })
       }))
@@ -188,7 +195,7 @@ class BlockingQueryInvoker {
         if (this.finalizer) {
           this.finalizer();
         }
-        if (e.name === 'AbortError') {
+        if (e.name === 'AbortError' || e.message === "abort error") {
           this.logger.info("blocking-query(" + this.path + ") was aborted by user's request")
           return {};
         }
@@ -206,9 +213,10 @@ class BlockingQueryInvoker {
         this.finalizer = res;
       }))
     }
-    if (this.timerId != null) {
-      clearTimeout(this.timerId);
-      this.timerId = null;
+    if (this.blockingTimerObj != null) {
+      clearTimeout(this.blockingTimerObj.timerId);
+      this.blockingTimerObj.onCanceled()
+      this.blockingTimerObj = null;
     }
     return ret;
   }
@@ -223,6 +231,7 @@ class ConsulCluster extends Cluster{
 
   _initialize(initConn) {
     this.logger.info("Try to initialize cluster");
+    this.stopRenew = false
     return Promise.resolve()
       .then(()=>this._getInitialConnectionKey(initConn))
       .then((initialConnectionKey)=>{
@@ -250,9 +259,6 @@ class ConsulCluster extends Cluster{
 
   _watchMembers() {
     this.memberQueryInvoker.next((e, body)=>{
-      if (this.stopUpdateProcess) {
-        return;
-      }
       if (e != null) {
         this.logger.warn("Failed to watch members. ", e);
         this.memberWatcherTimer = setTimeout(()=>this._watchMembers(), BLOCKINGQUERY_RETRY_INTERVAL)
@@ -529,6 +535,10 @@ class ConsulCluster extends Cluster{
   }
 
   _setRenewTimer() {
+    if (this.stopRenew) {
+      this.logger.warn("Renew session timer is suspended.")
+      return
+    }
     this.renewTimerId = setTimeout(()=>this._doRenew(), CONSUL_SESSION_RENEW_INTERVAL)
   }
 
@@ -566,6 +576,10 @@ class ConsulCluster extends Cluster{
       if (this.memberQueryInvoker != null) {
         return this.memberQueryInvoker.stop()
       }
+      if (this.memberWatcherTimer != null) {
+        clearTimeout(this.memberWatcherTimer)
+        this.memberWatcherTimer = null
+      }
     })
   }
 
@@ -582,6 +596,7 @@ class ConsulCluster extends Cluster{
       clearTimeout(this.renewTimerId)
     }
     this.renewTimerId = null
+    this.stopRenew = true
   }
 
   _suspend() {
@@ -610,6 +625,7 @@ class ConsulCluster extends Cluster{
   }
 
   _resume() {
+    this.stopRenew = false
     return Promise.resolve()
     .then(()=> {
       if (this.memberQueryInvoker == null) {
@@ -653,6 +669,7 @@ class ConsulCluster extends Cluster{
             if (isSessionAlive) {
               this.logger.info(`Resume cluster: Set renew timer`);
               this._setRenewTimer()
+              this._watchMembers()
             } else {
               return this._createSession()
               .then(()=> {
@@ -660,6 +677,7 @@ class ConsulCluster extends Cluster{
                   return promise.then(()=>this._acquireLock(key, true))
                 }, Promise.resolve())
               })
+              .then(()=>this._watchMembers())
             }
           })
         } else {
