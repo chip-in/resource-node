@@ -21,6 +21,7 @@ class PNConnection extends Connection {
 
     this.primaryConn.addConnectEventListener(() => {
       if(this.isRecovering) {
+        this.logger.warn("Connect event fired in recovering. we ignore it")
         return
       }
       return Promise.resolve()
@@ -43,6 +44,7 @@ class PNConnection extends Connection {
 
     this.primaryConn.addDisconnectEventListener(()=> {
       if(this.isRecovering) {
+        this.logger.warn("Disconnect event fired in recovering. we ignore it")
         return
       }
       return Promise.resolve()
@@ -327,6 +329,7 @@ class PNConnection extends Connection {
     }
     const finishRecoveryProcess = () => {
       this.isRecovering = false
+      this.logger.info("Recovery process has finished")
       if (this.needRetry) {
         setImmediate(() => {
           this.needRetry = false

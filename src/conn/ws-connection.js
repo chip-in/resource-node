@@ -21,32 +21,32 @@ class WSConnection extends AbstractConnection {
     this.proxies = {};
     this.waiters = []
 
-    this.socketioStatus = null
+    this.socketioStatus = "disconnect"
   }
 
   _open(){
     if (this.denySocketProcess) {
       throw new Error("Can't use socket from disconnect listener")
     }
-    if (this.socket != null) {
-      if (this.isConnected) {
-        //already opened
-        return Promise.resolve()
-      }
-      if (this.socketioStatus === "connect") {
-        this.logger.info("connection has already connected but initializing process has not completed");
-      } else {
-        this.logger.warn("wait for reconnect");
-      }
-      return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
-        this.logger.warn("notified (re)connecting + registering");
-        this.waiters.push(resolve)
-      })
-    }
     var isRespond = false;
     return Promise.resolve()
     .then(()=>{
       return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
+        if (this.socket != null) {
+          if (this.isConnected) {
+            //already opened
+            return Promise.resolve()
+          }
+          if (this.socketioStatus === "connect") {
+            this.logger.info("connection has already connected but initializing process has not completed");
+          } else {
+            this.logger.warn("wait for reconnect");
+          }
+          return new Promise((resolve, reject) => {/*eslint-disable-line no-unused-vars*/
+            this.logger.warn("notified (re)connecting + registering");
+            this.waiters.push(resolve)
+          })
+        }
         var initSocket = ()=>{
           this.logger.warn(`Start to open websocket connection for core-node`);
           var s = ioClient(this.coreNodeURL,{
@@ -60,7 +60,6 @@ class WSConnection extends AbstractConnection {
           }
           const setStatusToDisconnect = (reason) => {
             this.socketioStatus = "disconnect"
-            this.isConnected = false;
             if (reason === "io client disconnect") {
               //Disable using socket from disconnect listener when client is shutting down
               this.denySocketProcess = true
@@ -69,9 +68,6 @@ class WSConnection extends AbstractConnection {
               clearTimeout(this.registerTimerId)
               this.registerTimerId = null
             }
-          }
-          const setStatusToConnectError = () => {
-            this.socketioStatus = "connect_error"
           }
           s.on('connect', ()=>{
             this.logger.warn(`connected to core-node via websocket`);
@@ -184,27 +180,19 @@ class WSConnection extends AbstractConnection {
               }
             })
           }
-          s.on('disconnect', (r)=>{
-            this.logger.warn(`disconnected to core-node via websocket. Reason:${r}`);
-            let promise = Promise.resolve()
+          const onDisconnect = (reason) => {
+            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}`);
             let currentStatus = this.socketioStatus
-            promise.then(()=>setStatusToDisconnect(r))
+            setStatusToDisconnect(reason)
             if (currentStatus === "connect") {
-              promise = promise.then(()=>doDisconnect(r))
+              this.logger.info(`Change socketioStatus from ${currentStatus} to ${this.socketioStatus}, we invoke disconnect handler`);
+              doDisconnect(reason)
             } else {
-              this.logger.info(`Current socketioStatus = ${currentStatus}, we skip disconnect handler and set status to 'disconnect'`);
+              this.logger.info(`Current socketioStatus = ${currentStatus}, we skip disconnect handler`);
             }
-          });
-          s.on('connect_error', (e)=>{
-            this.logger.error(`Connection error: message='${e.message}', name=${e.name}`);
-            let promise = Promise.resolve()
-            if (this.socketioStatus === "connect") {
-              //skip disconnect event
-              this.logger.warn(`Current socketioStatus = ${this.socketioStatus}, disconnect event may be skipped. We execute disconnect handler`);
-              promise = promise.then(()=>doDisconnect("connect_error"))
-            }
-            promise.then(()=>setStatusToConnectError())
-          })
+          }
+          s.on('disconnect', (r)=>onDisconnect(r));
+          s.on('connect_error', (e)=>onDisconnect(e ? e.message : "connect_error"))
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg);
           });

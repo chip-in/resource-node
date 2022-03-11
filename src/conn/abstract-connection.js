@@ -11,10 +11,11 @@ class ConnectionLogger extends Logger{
     this.coreNodeURL = coreNodeURL;
     this.delegate = new Logger(category);
     this.basePath = basePath;
+    this.loggerInstanceId = uuidv4()
   }
   _log(name, args) {
     args = Array.prototype.slice.call(args)
-    args[0] = "("+this.coreNodeURL+this.basePath+")" + args[0];
+    args[0] = "("+this.coreNodeURL+this.basePath+")" + `(${this.loggerInstanceId})` + args[0];
     this.delegate[name].apply(this.delegate, args);
   }
   debug()  {
