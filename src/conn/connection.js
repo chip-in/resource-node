@@ -21,27 +21,41 @@ class Connection extends AbstractConnection{
     this.mqttConn = new MQTTConnection(coreNodeURL, basePath, userId, password, token);
   }
 
+  newConnection() {
+    const ret = new Connection(this.coreNodeURL, this.basePath, this.userId, this.password, this.token, this.jwtUpdatepath, this.handlers)
+    this.wsConn.copyListenerTo(ret.wsConn)
+    return ret
+  }
+
   getInitialArgs() {
     return this.initArgs;
   }
 
   _open() {
     return Promise.resolve()
+      .then(()=>this.raiseSuspended())
       .then(()=>this._startJWTRefreshProcess())
       .then(()=>this.wsConn.open())
       .then(()=>this.mqttConn.open())
+      .catch((e) => {
+        this.logger.error("Failed to open connection", e)
+        throw e
+      })
   }
   
   /*
    * override
    */
   ensureConnected(timeout) {
-    return this.wsConn.ensureConnected(timeout)
+    return Promise.resolve()
+      .then(()=>this.raiseSuspended())
+      .then(()=>this.wsConn.ensureConnected(timeout))
       .then(()=>this.isConnected = true)
   }
 
   _close() {
     return Promise.resolve()
+      .then(()=>this.raiseSuspended())
       .then(()=>{
         if (this.tokenTimerId != null) {
           clearTimeout(this.tokenTimerId);
@@ -59,23 +73,28 @@ class Connection extends AbstractConnection{
     option = Object.assign({}, fetchOption, option);
     this._normalizeHeader(option);
     this._setAuthorizationHeader(option);
-    return fetchImpl(href, option);
+    return Promise.resolve()
+      .then(()=>this.raiseSuspended())
+      .then(()=>fetchImpl(href, option))
   }
 
   publish(topicName, message) {
     return Promise.resolve()
+      .then(()=>this.raiseSuspended())
       .then(()=>this.ensureConnected())
       .then(()=>this.mqttConn.publish(topicName, message))
   }
 
   subscribe(topicName, subscriber) {
     return Promise.resolve()
+      .then(()=>this.raiseSuspended())
       .then(()=>this.ensureConnected())
       .then(()=>this.mqttConn.subscribe(topicName, subscriber))
   }
 
   unsubscribe(key) { 
     return Promise.resolve()
+      .then(()=>this.raiseSuspended())
       .then(()=>this.ensureConnected())
       .then(()=>this.mqttConn.unsubscribe(key))
   }
@@ -88,11 +107,13 @@ class Connection extends AbstractConnection{
 
   mount(path, mode, proxy, option) {
     return Promise.resolve()
+    .then(()=>this.raiseSuspended())
     .then(()=>this.wsConn.mount(path, mode, proxy, option))
   }
 
   unmount(handle) {
     return Promise.resolve()
+    .then(()=>this.raiseSuspended())
     .then(()=>this.wsConn.unmount(handle))
   }
   
@@ -229,6 +250,22 @@ class Connection extends AbstractConnection{
 
   getUserInformation() {
     return this.wsConn.userInfo;
+  }
+
+  addConnectEventListener(l) {
+    return this.wsConn.addConnectEventListener(l)
+  }
+
+  removeConnectEventListener(id) {
+    this.wsConn.removeConnectEventListener(id)
+  }
+
+  addDisconnectEventListener(l) {
+    return this.wsConn.addDisconnectEventListener(l)
+  }
+
+  removeDisconnectEventListener(id) {
+    return this.wsConn.removeDisconnectEventListener(id)
   }
 }
 export default Connection;

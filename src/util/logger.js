@@ -36,7 +36,7 @@ class Logger {
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
    */
-  debug(msg, substN) {
+  debug(msg, substN) {/*eslint-disable-line no-unused-vars*/
     var level = "DEBUG";
     if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
@@ -47,7 +47,7 @@ class Logger {
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
    */
-  info(msg, substN) {
+  info(msg, substN) {/*eslint-disable-line no-unused-vars*/
     var level = "INFO";
     if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
@@ -58,7 +58,7 @@ class Logger {
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
    */
-  warn(msg, substN) {
+  warn(msg, substN) {/*eslint-disable-line no-unused-vars*/
     var level = "WARN";
     if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }
@@ -69,7 +69,7 @@ class Logger {
    * @param  substN JavaScript オブジェクトと msg 内の置換文字列を置換。これにより、出力の書式の詳細な制御が可能となります。可変長で、N個のパラメータを指定できる。
    *
    */
-  error(msg, substN) {
+  error(msg, substN) {/*eslint-disable-line no-unused-vars*/
     var level = "ERROR";
     if(this._isEnabled(level)) logging.apply(null, [level, this.category].concat(Array.prototype.slice.call(arguments)));
   }

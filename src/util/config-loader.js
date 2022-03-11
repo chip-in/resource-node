@@ -6,16 +6,17 @@ var basePath = "/c/rn/";
 var ext = "yml";
 
 var doIndent = (val, indent)=> {
+  let i = 0
   if (val == null) {
     return val;
   }
   var tabs = ""
-  for(var i = 0; i < indent; i++) {
+  for(i = 0; i < indent; i++) {
     tabs += " "
   }
   var vals = val.split("\n");
   var dst = [];
-  for (var i = 0; i < vals.length; i++) {
+  for (i = 0; i < vals.length; i++) {
     if (i !== 0) {
       dst.push(tabs + vals[i]);
     } else {
@@ -31,7 +32,7 @@ class CIConfigParser {
     this.rnode = rnode;
   }
   
-  parse(parser, nodes, lexer) {
+  parse(parser, nodes, lexer) {/*eslint-disable-line no-unused-vars*/
     var tok = parser.nextToken();
     var args = parser.parseSignature(null, true);
     parser.advanceAfterBlockEnd(tok.value);

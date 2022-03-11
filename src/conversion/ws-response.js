@@ -37,7 +37,7 @@ export default class WSResponse {
       });
   }
   get(field) {
-    return headers[field][0];
+    return this.headers[field][0];
   }
   location(path) {
     this.location = path;
@@ -94,9 +94,9 @@ export default class WSResponse {
       if (typeof cb === "function") cb();
     }, ms);
   }
-  write(chunk, encoding, cb) {
+  write(chunk, encoding, cb) {/*eslint-disable-line no-unused-vars*/
     if (typeof encoding === "function") {
-      cb = encoding;
+      cb = encoding; /*eslint-disable-line no-unused-vars*/
       encoding = null;
     }
     if (encoding) {
@@ -152,7 +152,7 @@ export default class WSResponse {
       return Promise.resolve()
         .then(()=>{
           if (this.timeoutId) {
-            clearTimeout(timeoutId);
+            clearTimeout(this.timeoutId);
             this.timeoutId = null;
           }
         }).then(()=>this.req.emit("close"))
