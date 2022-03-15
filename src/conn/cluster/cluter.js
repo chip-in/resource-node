@@ -251,6 +251,10 @@ class Cluster {
   }
   
   toList() {
+    if (this.initialConnection == null) {
+      this.logger.warn("InitialConnection is null. Cluster may be restarting ( or not be initialized).");
+      throw new Error("initialConnection is null. Cluster may be restarting ( or not be initialized).")
+    }
     return [this.initialConnection, ...this.coreNodeConnections]
       .map((connWrapper)=>connWrapper.conn)
   }
