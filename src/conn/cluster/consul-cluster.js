@@ -21,6 +21,7 @@ const CONSUL_TOKEN_HEADER_VALUE = process.env.CONSUL_TOKEN_HEADER_VALUE;
 const BLOCKINGQUERY_RETRY_INTERVAL = 60 * 1000;
 const CONSUL_SESSION_TTL = "30s";
 const CONSUL_SESSION_LOCK_DELAY_SECONDS = 10;
+const CONSUL_SESSION_CREATE_RETRY_INTERVAL = 1 * 1000;
 const CONSUL_SESSION_RENEW_INTERVAL = 10 * 1000;
 const CONSUL_SESSION_RENEW_ERROR_THRESHOLD = 3;
 
@@ -108,46 +109,56 @@ class BlockingQueryInvoker {
   get() {
     return Promise.resolve()
       .then(()=>this._startQuery())
-      .then(({body})=> body)
+      .then((ret)=> ret != null ? ret.body : null)
   }
 
-  next(cb) {
-    var invoked = false;
-    this.cblist.push((body)=>{
-      cb(null, body);
-      invoked = true;
-    });
+  next() {
     return Promise.resolve()
       .then(()=>this.lock.acquire(this.lockKey, ()=>{
-        if (invoked) {
-          return;
-        }
-        return this._startQuery(this.index)
-        .then(({index, body}) => {
-          if (body == null) {
+        const parseQueryResult = (ret) => {
+          if (ret == null) {
             // request is aborted
-            return
+            return null
           }
+          let {index, body} = ret
           this.index = index;
-          this.cblist.map((cb)=>cb(body));
-          this.cblist = [];
-        })
-        .catch((e) => {
+          return body
+        }
+        const handleError = (e) => {
           this.logger.warn("Failed to search next value", e)
-          return new Promise((resolve, reject)=> {
+          return new Promise((resolve, reject)=> {/*eslint-disable-line no-unused-vars*/
+            let isResolved = false
             let timerId = setTimeout(()=>{
               this.blockingTimerObj = null
-              this._startQuery(this.index)
-                    .then(resolve).catch(reject)
+              doNextQuery().then((ret)=>{
+                if (isResolved) {
+                  this.logger.warn("Suceeded to query but promise has already resolved")
+                  return
+                }
+                resolve(ret)
+                isResolved = true
+              })
             }, BLOCKINGQUERY_RETRY_INTERVAL);
             this.blockingTimerObj = {
               timerId,
               onCanceled: () => {
-                reject(new Error("abort error"))
+                if (isResolved) {
+                  this.logger.warn("Blocking query is canceled but promise has already resolved")
+                  return
+                }
+                this.logger.warn("Blocking query is canceled")
+                resolve(null)
+                isResolved = true
               }
             }
           })
-        })
+        }
+        const doNextQuery = () => {
+          return this._startQuery(this.index)
+            .then((ret) => parseQueryResult(ret))
+            .catch((e) => handleError(e))
+        }
+        return doNextQuery()
       }))
   }
 
@@ -197,7 +208,7 @@ class BlockingQueryInvoker {
         }
         if (e.name === 'AbortError' || e.message === "abort error") {
           this.logger.info("blocking-query(" + this.path + ") was aborted by user's request")
-          return {};
+          return null;
         }
         this.logger.warn("Failed to blocking-query(" + this.path + ")", e)
         //retry after an interval
@@ -243,7 +254,12 @@ class ConsulCluster extends Cluster{
             this.memberQueryInvoker = new BlockingQueryInvoker(initConn, API_PATH_TO_RESOLVE_MEMBERS)
             return this.memberQueryInvoker.get();
           })
-          .then((body)=>this._parseMembers(body))
+          .then((body)=>{
+            if (body == null) {
+              throw new Error("Failed to get consul-member")
+            }
+            return this._parseMembers(body)
+          })
           .then((members)=>{
             this.logger.info("Succeeded to find initial members. members=" + JSON.stringify(members));
             this.coreNodeConnections = members.filter((m)=>m.nodeKey !== this.initialConnectionKey).map((m)=>this.toConnObject(m.nodeKey, this._createConnection(m.nodeKey, this.initialConnection.conn)))
@@ -258,11 +274,20 @@ class ConsulCluster extends Cluster{
   }
 
   _watchMembers() {
-    this.memberQueryInvoker.next((e, body)=>{
-      if (e != null) {
-        this.logger.warn("Failed to watch members. ", e);
-        this.memberWatcherTimer = setTimeout(()=>this._watchMembers(), BLOCKINGQUERY_RETRY_INTERVAL)
-        return;
+    this.memberQueryInvoker.next().then((body)=>{
+      // if (e != null) {
+      //   if (e.name === 'AbortError' || e.message === "abort error") {
+      //     this.logger.warn("Member watching was aborted by user's request")
+      //     return ;
+      //   }
+      //   this.logger.warn("Failed to watch members. ", e);
+      //   this.memberWatcherTimer = setTimeout(()=>this._watchMembers(), BLOCKINGQUERY_RETRY_INTERVAL)
+      //   return;
+      // }
+      if (body == null) {
+        // request is aborted
+        this.logger.warn("Request is aborted. Finished to watch member.");
+        return
       }
       this._checkDifference(this._parseMembers(body))
         .then(()=>this._watchMembers())
@@ -380,10 +405,7 @@ class ConsulCluster extends Cluster{
   }
 
   _finalize(closeAll) {
-    var ret = Promise.resolve()
-    if (this.memberQueryInvoker != null) {
-      ret = ret.then(()=>this.memberQueryInvoker.stop())
-    }
+    var ret = Promise.resolve().then(()=>this._stopWathingMemberChanges())
     if (this.sessionId != null) {
       ret = ret.then(()=>_doPutOperation(this.getInitConnection(), API_PATH_TO_DELETE_SESSION.replace(":id", this.sessionId)))
       .then((result)=>{
@@ -447,7 +469,12 @@ class ConsulCluster extends Cluster{
             throw e
           }
           // retry
-          return this._acquireLock(key, oneshot)
+          return new Promise((resolve, reject) => {
+            setTimeout(()=>{
+              this._acquireLock(key, oneshot)
+                .then(resolve).catch(reject)
+            }, CONSUL_SESSION_CREATE_RETRY_INTERVAL)
+          })
         })
     }
     var regKey = this._createKVSKey(key)
@@ -465,7 +492,7 @@ class ConsulCluster extends Cluster{
           throw new Error(`Failed to acquire lock for key '${key}'(${regKey}).`)
         }
         //fail(1st) => retry after lock-delay seconds
-        this.logger.warn("Failed to acquire lock. We retry to acquire lock after " + CONSUL_SESSION_LOCK_DELAY_SECONDS + " seonds. SessionId:" + this.sessionId + ", key:" + regKey);
+        this.logger.warn("Failed to acquire lock. We retry to acquire lock after " + CONSUL_SESSION_LOCK_DELAY_SECONDS + " seconds. SessionId:" + this.sessionId + ", key:" + regKey);
         return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
           let timerId = setTimeout(()=>{
             this.lockTimer = this.lockTimer.filter(obj => obj.timerId != timerId)
