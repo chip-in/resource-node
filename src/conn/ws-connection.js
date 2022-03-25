@@ -10,6 +10,12 @@ const webSocketSkipCompress = process.env.CNODE_WSOCKET_SKIP_COMPRESS ? true : f
 const webSocketSkipCompressMaxSize = process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE ? 
   parseInt(process.env.CNODE_WSOCKET_SKIP_COMPRESS_MAX_SIZE, 10) : 10 * 1024 * 1024
 
+let maxPayloadDefault = 104857600
+let webSocketMaxPayload = parseInt(process.env.CNODE_WSOCKET_MAX_PAYLOAD || String(maxPayloadDefault))
+if (Number.isNaN(webSocketMaxPayload)) {
+  webSocketMaxPayload = maxPayloadDefault
+}
+
 class WSConnection extends AbstractConnection {
 
   constructor(coreNodeURL, basePath, userId, password, token, handlers) {
@@ -52,7 +58,12 @@ class WSConnection extends AbstractConnection {
           var s = ioClient(this.coreNodeURL,{
             path : this.basePath + webSocketPath,
             extraHeaders : this.createAuthorizationHeaders(this.userId, this.password, this.token),
-            forceNew : true
+            forceNew : true,
+            transportOptions: {
+              "websocket": {
+                maxPayload: webSocketMaxPayload
+              }
+            }
           });
           const setStatusToConnect = () =>{
             this.socketioStatus = "connect"
