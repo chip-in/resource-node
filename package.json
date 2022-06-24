@@ -1,6 +1,6 @@
 {
   "name": "@chip-in/resource-node",
-  "version": "0.1.4",
+  "version": "0.1.5-rc0575b04b.0",
   "description": "chip-in ResourceNode",
   "keywords": [
     "chip-in"
