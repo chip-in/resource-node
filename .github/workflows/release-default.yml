@@ -26,7 +26,7 @@ jobs:
 
       - name: build
         run: |
-          npm run install
+          npm install
           npm run cleanbuild
 
       - name: list all tag
