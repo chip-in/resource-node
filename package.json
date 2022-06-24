@@ -10,6 +10,7 @@
   },
   "license": "MIT",
   "main": "lib/index.js",
+  "types": "./index.d.ts",
   "scripts": {
     "cleanbuild": "npm run clean && npm run build",
     "build": "npm run lint && babel src -s inline -d lib/",
