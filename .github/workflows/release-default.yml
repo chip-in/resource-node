@@ -1,0 +1,61 @@
+name: release apps
+
+on:
+  push:
+    branches-ignore:
+      - '**'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+jobs:
+  push_to_npm:
+    name: Push module to npm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v2
+
+      - name: Set env
+        run: echo "TAG_VALUE=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+
+      - name: Setup Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
+          registry-url: 'https://registry.npmjs.org'
+          scope: '@kkuwa'
+
+      - name: build
+        run: |
+          npm run install
+          npm run cleanbuild
+
+      - name: list all tag
+        run: |
+          echo 'TAG_LIST<<EOF' >> $GITHUB_ENV
+          git -c 'versionsort.suffix=-' ls-remote --tags --sort='-v:refname' --refs origin | sed -e "s/^.*refs\/tags\///g" | head -n 20 >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
+
+      - name: Check is latest tag
+        run: |
+          echo 'IS_PREVIOUS_VERSION<<EOF' >> $GITHUB_ENV
+          npx semver -r ">${{env.TAG_VALUE}}" ${TAG_LIST} | wc -l >> $GITHUB_ENV
+          echo 'EOF' >> $GITHUB_ENV
+
+      - name: release latest
+        if: "env.IS_PREVIOUS_VERSION == '0'"
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Resolve minor version
+        if: "env.IS_PREVIOUS_VERSION != '0'"
+        run: |
+          VERSION=${{env.TAG_VALUE}}
+          MINOR=${VERSION%.*}
+          echo "NPM_TAG_VALUE=stable-${MINOR#v}" >> $GITHUB_ENV
+
+      - name: release stable
+        if: "env.IS_PREVIOUS_VERSION != '0'"
+        run: npm publish --tag ${{ env.NPM_TAG_VALUE }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

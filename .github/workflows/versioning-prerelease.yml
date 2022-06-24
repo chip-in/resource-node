@@ -1,0 +1,50 @@
+name: auto prerelease versioning for feature branch
+on:
+  push:
+    tags-ignore: 
+      - '**'
+    branches-ignore:
+      - main
+      - stable-*
+jobs:
+  version-up-rc:
+    runs-on: ubuntu-latest
+    env:
+      # https://github.community/t/github-action-trigger-on-release-not-working-if-releases-was-created-by-automation/16559
+      GITHUB_USER: ${{ secrets.EXT_GITHUB_USER }}
+      GITHUB_TOKEN: ${{ secrets.EXT_GITHUB_PAT }}
+      RELEASE_IT_VERSION: 14.14.0
+      BUMPER_VERSION: 3.0.1
+    steps:
+      - name: Check out codes
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.EXT_GITHUB_PAT }}
+          
+      - name: Resolve branch name
+        run: 'echo BRANCH_NAME="${{ github.ref_name }}" >> $GITHUB_ENV'
+
+      - name: Resolve branch hash
+        run: 'echo BRANCH_NAME_HASH="$(echo $BRANCH_NAME | sha256sum)" >> $GITHUB_ENV'
+
+      - name: Resolve rc name
+        run: echo RC_NAME=${BRANCH_NAME_HASH:1:8} >> $GITHUB_ENV
+
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: '16'
+
+      - name: Set releaser settings
+        run: |
+          git config --global user.name ${{ secrets.EXT_GITHUB_USER }}
+          git config --global user.email ${{ secrets.EXT_GITHUB_EMAIL }}
+
+      - name: Update prerelease version
+        id: prerelease
+        if: "contains(toJSON(github.event.commits.*.message), '[[PRERELEASE]]')  && !contains(toJSON(github.event.commits.*.message), '[automate_versioning_prerelease] Prerelease ')"
+        run: |
+          npm i -g release-it@${RELEASE_IT_VERSION}
+          npm i -g @release-it/bumper@${BUMPER_VERSION}
+          release-it -c .release-it-prerelease.json --preRelease=rc${{env.RC_NAME}} --ci

@@ -1,0 +1,18 @@
+{
+    "requireUpstream": false,
+    "requireCleanWorkingDir": false,
+    "github": {
+      "release": false
+    },
+    "git": {
+      "commit": true,
+      "push": true,
+      "requireUpstream": false,
+      "requireCleanWorkingDir": false,
+      "tagName": "v${version}",
+      "commitMessage": "[automate_versioning] Release ${version}"
+    },
+    "npm": {
+      "publish": false
+    }
+  }

@@ -1,0 +1,37 @@
+name: auto versioning for stable branch
+on:
+  push:
+    tags-ignore: 
+      - '**'
+    branches:
+      - stable-*
+jobs:
+  version-up-stable:
+    runs-on: ubuntu-latest
+    env:
+      # https://github.community/t/github-action-trigger-on-release-not-working-if-releases-was-created-by-automation/16559
+      GITHUB_USER: ${{ secrets.EXT_GITHUB_USER }}
+      GITHUB_TOKEN: ${{ secrets.EXT_GITHUB_PAT }}
+      RELEASE_IT_VERSION: 14.14.0
+      BUMPER_VERSION: 3.0.1
+    steps:
+      - name: Check out codes
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.EXT_GITHUB_PAT }}
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: '16'
+      - name: Set releaser settings
+        run: |
+          git config --global user.name ${{ secrets.EXT_GITHUB_USER }}
+          git config --global user.email ${{ secrets.EXT_GITHUB_EMAIL }}
+      - name: Patch release
+        # バージョン更新コミットでない場合（ループ抑止）はビルドバージョンを更新する
+        if: "!contains(toJSON(github.event.commits.*.message), '[automate_versioning] Release')"
+        run: |
+          npm i -g release-it@${RELEASE_IT_VERSION}
+          npm i -g @release-it/bumper@${BUMPER_VERSION}
+          release-it -- patch --ci
