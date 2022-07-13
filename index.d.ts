@@ -5,6 +5,9 @@ interface ServiceEngineConstructor {
 }
 
 export class ResourceNode {
+    nodeClassName: string;
+    logger: RNLogger;
+    started: boolean;
     constructor(coreNodeURL: string, nodeClassName: string)
     fetch(path: string, option?: {}): Promise<Response>;
     mount(path: string, mode: string, proxy: Proxy, option?: object): Promise<string>;
@@ -18,6 +21,9 @@ export class ResourceNode {
     unmount(handle: string): Promise<void>;
     unsubscribe(key: string): Promise<void>;
     setJWTAuthorization(jwt: string, updatePath: string): void;
+    setCustomParameter(name: string, value: any): Promise<void>;
+    addEventListener(type: ListnerType, listner: () => void): string;
+    removeEventLister(listenerId: string): void;
 }
 
 export abstract class Proxy {
@@ -35,3 +41,13 @@ export abstract class Subscriber {
     constructor()
     abstract onReceive(msg: string): void;
 }
+
+export class RNLogger {
+    category: string;
+    debug(msg: string, ...substN: Array<string | number>): void;
+    info(msg: string, ...substN: Array<string | number>): void;
+    warn(msg: string, ...substN: Array<string | number>): void;
+    error(msg: string, ...substN: Array<string | number>): void;
+}
+
+export type ListnerType = "connect" | "disconnect";
