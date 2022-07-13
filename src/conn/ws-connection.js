@@ -28,6 +28,7 @@ class WSConnection extends AbstractConnection {
     this.waiters = []
 
     this.socketioStatus = "disconnect"
+    this.initializeErrorCallback = null
   }
 
   _open(){
@@ -38,6 +39,7 @@ class WSConnection extends AbstractConnection {
     return Promise.resolve()
     .then(()=>{
       return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
+        this.initializeErrorCallback = rej
         if (this.socket != null) {
           if (this.isConnected) {
             //already opened
@@ -83,6 +85,7 @@ class WSConnection extends AbstractConnection {
           s.on('connect', ()=>{
             this.logger.warn(`connected to core-node via websocket`);
             setStatusToConnect()
+            this.initializeErrorCallback = null
 
             //start clustering
             var doRegister = () => {
@@ -408,6 +411,9 @@ class WSConnection extends AbstractConnection {
         }
         this.socket = null;
         sock.close();
+        if (this.initializeErrorCallback != null) {
+          this.initializeErrorCallback("socket closed")
+        }
       });
   }
   
