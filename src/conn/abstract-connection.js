@@ -144,7 +144,7 @@ class AbstractConnection {
     if (jwt != null) {
       headers['Authorization'] = 'Bearer ' + jwt;
     } else if (userId != null && passwd != null) {
-      headers['Authorization'] = 'Basic ' + new Buffer(userId + ":" + passwd).toString("base64");
+      headers['Authorization'] = 'Basic ' + Buffer.from(userId + ":" + passwd).toString("base64");
     }
     return headers;
   }

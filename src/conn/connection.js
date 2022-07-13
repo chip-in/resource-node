@@ -233,7 +233,7 @@ class Connection extends AbstractConnection{
   }
   
   _decodeJwt (jwt) {
-    return JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+    return JSON.parse(Buffer.from(jwt.split(".")[1], "base64").toString());
   }
 
   _calcNextUpdateTime(jwt) {

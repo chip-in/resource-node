@@ -858,7 +858,7 @@ rnode.start()
     if (jwt == null) {
       return false
     }
-    const token = JSON.parse(new Buffer(jwt.split(".")[1], "base64").toString());
+    const token = JSON.parse(Buffer.from(jwt.split(".")[1], "base64").toString());
     const limit = token.exp
     const now = Math.round(new Date().getTime() / 1000)
     if (now < limit) {
