@@ -12,6 +12,12 @@ import PNConnectom from './conn/pn-connection';
 
 const COOKIE_NAME_TOKEN = "access_token";
 
+const RN_STATUS_INITIALIZED = "initialized"
+const RN_STATUS_STARTING = "starting"
+const RN_STATUS_STARTED = "started"
+const RN_STATUS_STOPPING = "stopping"
+const RN_STATUS_STOPPED = "stopped"
+
 /**
  * @desc リソースノードクラスはコアノードとの通信管理やサービスエンジンの起動を行う。
  */
@@ -60,7 +66,7 @@ class ResourceNode {
      * @desc 起動状態を表すフラグ
      * @type {boolean}
      */
-    this.started = false;
+    this.status = RN_STATUS_INITIALIZED;
 
     this.proxyDirService = new DirectoryService();
 
@@ -82,6 +88,13 @@ class ResourceNode {
 
     this.listenerMap = {};
 
+    this.pendingRequest = []
+  }
+
+  _resumeRequests(stat) {
+    const reqs = this.pendingRequest
+    this.pendingRequest = []
+    reqs.map(func=> func(stat))
   }
 
   /**
@@ -101,8 +114,25 @@ node.start()
    *
    */
   start() {
-    if (this.started) {
-      return Promise.resolve();
+    if (this.status === RN_STATUS_STOPPING || this.status === RN_STATUS_STOPPED) {
+      this.logger.warn("resource-node has already stopped");
+      return Promise.reject("resource-node has already stopped")
+    }
+    if (this.status === RN_STATUS_STARTED) {
+      this.logger.warn("resource-node has already started");
+      return Promise.resolve()
+    }
+    if (this.status === RN_STATUS_STARTING) {
+      this.logger.warn("resource-node has already been starting");
+      return new Promise((resolve, reject) => {
+        this.pendingRequest.push((stat)=> {
+          if (stat === RN_STATUS_STARTED) {
+            resolve()
+          } else {
+            reject("resource-node has already stopped")
+          }
+        })
+      })
     }
     var token = this._resolveToken()
     this.conn = new Connection(this.coreNodeURL, null, this.userId, this.password, token, this.jwtUpdatepath, {
@@ -110,16 +140,22 @@ node.start()
       "onDisconnect" : ()=>this._onDisconnect(),
       "onTokenUpdate" : ()=>this._onTokenUpdate()
     });
+    this.status = RN_STATUS_STARTING
     return Promise.resolve()
       .then(()=>this.conn.open())
       .then(()=>this.userInfo = this.conn.getUserInformation())
       .then(()=>this._initConnectionContext())
       .then(()=>this._enableServices())
       .then(()=>this._initApplicationContext())
-      .then(()=>this.started = true)
+      .then(()=>{
+        this.status = RN_STATUS_STARTED
+        this._resumeRequests(RN_STATUS_STARTED)
+      })
       .catch((e)=>{
         this.logger.error("Failed to start resource-node", e);
         this.stop(true)
+        this.status = RN_STATUS_STOPPED
+        this._resumeRequests(RN_STATUS_STOPPED)
         return Promise.reject(e);
       })
   }
@@ -139,17 +175,56 @@ node.stop()
 });
    */
   stop(force) {
-    if (this.conn == null) {
+    if (this.status === RN_STATUS_INITIALIZED || this.status === RN_STATUS_STOPPED) {
+      this.logger.warn("resource-node is not started");
+      this.status = RN_STATUS_STOPPED
       return Promise.resolve();
     }
-    if (!force && !this.started) {
-      return Promise.resolve();
+    if (!force) {
+      if (this.status === RN_STATUS_STOPPING) {
+        this.logger.warn("resource-node has already been stopping");
+        return new Promise((resolve, reject) => {
+          this.pendingRequest.push((stat) => {
+            if (stat === "stopped") {
+              resolve()
+            } else {
+              reject("unexpected state transition.")
+            }
+          })
+        })
+      }
+      if (this.status === RN_STATUS_STARTING) {
+        this.logger.warn("resource-node is starting. We shut down start process");
+        return new Promise((resolve, reject) => {
+          this.pendingRequest.push((stat) => {
+            if (stat === "stopped") {
+              resolve()
+            } else {
+              //started
+              return this.stop(force)
+                .then(resolve)
+                .catch(reject)
+            }
+          })
+          this.conn.close()
+        })
+
+      }
     }
+    this.status = RN_STATUS_STOPPING
     //It doesn't ensure connection
     return Promise.resolve()
       .then(()=>this._disableServices())
       .then(()=>this.conn.close())
-      .then(()=> this.started = false)
+      .then(()=> {
+        this.status = RN_STATUS_STOPPED
+        this._resumeRequests(RN_STATUS_STOPPED)
+      }).catch((e) => {
+        this.logger.error("Failed to stop resource-node", e);
+        this.status = RN_STATUS_STOPPED
+        this._resumeRequests(RN_STATUS_STOPPED)
+        return Promise.reject(e)
+      })
   }
 
   /**

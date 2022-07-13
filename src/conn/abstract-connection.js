@@ -49,6 +49,8 @@ class AbstractConnection {
     this.disconnectEventListeners = {}
 
     this.suspened = false
+
+    this.stopOpenProcess = false
   }
 
   ensureConnected() {
@@ -74,9 +76,28 @@ class AbstractConnection {
         if (this.isConnected) {
           return Promise.resolve();
         }
+        let shutdownMonitor = setInterval(()=> {
+          if (this.stopOpenProcess) {
+            this.logger.warn("stopOpenProcess is true")
+            this._close()
+            clearMonitor()
+          }
+        }, 1000)
+        const clearMonitor = () => {
+          if (shutdownMonitor != null) {
+            clearInterval(shutdownMonitor)
+            shutdownMonitor = null
+          }
+        }
         return Promise.resolve()
           .then(()=>this._open())
-          .then(()=>this.isConnected = true)
+          .then(()=>{
+            this.isConnected = true
+            clearMonitor()
+          }).catch((e) => {
+            clearMonitor()
+            throw e
+          })
       }))
       .catch((e) => {
         this.logger.error("Failed to open connection", e)
@@ -90,6 +111,7 @@ class AbstractConnection {
 
   close() {
     this.logger.info("Try to close connection")
+    this.stopOpenProcess = true
     return Promise.resolve()
       .then(()=>this.lock.acquire(this._getConnectionLockKey(), ()=>{
         if (!this.isConnected) {
@@ -97,10 +119,14 @@ class AbstractConnection {
         }
         return Promise.resolve()
           .then(()=>this._close())
-          .then(()=>this.isConnected = false)
+          .then(()=>{
+            this.isConnected = false
+            this.stopOpenProcess = false
+          })
       }))
       .catch((e) => {
         this.logger.error("Failed to close connection", e)
+        this.stopOpenProcess = false
         throw e
       })
   }

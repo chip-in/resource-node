@@ -38,7 +38,7 @@ class Connection extends AbstractConnection{
       .then(()=>this.wsConn.open())
       .then(()=>this.mqttConn.open())
       .catch((e) => {
-        this.logger.error("Failed to open connection", e)
+        this.logger.error("Failed to open connections", e)
         throw e
       })
   }
