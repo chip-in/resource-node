@@ -138,7 +138,7 @@ node.start()
     this.conn = new Connection(this.coreNodeURL, null, this.userId, this.password, token, this.jwtUpdatepath, {
       "onConnect" : ()=>this._onConnect(),
       "onDisconnect" : ()=>this._onDisconnect(),
-      "onTokenUpdate" : ()=>this._onTokenUpdate()
+      "onTokenUpdate" : (token)=>this._onTokenUpdate(token)
     });
     this.status = RN_STATUS_STARTING
     return Promise.resolve()
