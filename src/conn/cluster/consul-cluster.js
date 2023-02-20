@@ -2,9 +2,9 @@ import Cluster from './cluter';
 import Logger from '../../util/logger';
 import {resolve} from 'url';
 import AbortController from 'abort-controller';
-import AsyncLock from 'async-lock'
 import Connection from '../connection';
 import objectHash from 'object-hash';
+import { createLock } from '../../util/lock'
 
 const API_PATH_TO_RESOLVE_MEMBERS = "/v1/catalog/service/hmr";
 const API_PATH_TO_RESOLVE_NODE_KEY = "/v1/agent/self";
@@ -101,7 +101,7 @@ class BlockingQueryInvoker {
     this.path = path;
     this.cblist = [];
     this.logger = new Logger(this.constructor.name);
-    this.lock = new AsyncLock();
+    this.lock = createLock();
     this.lockKey = path;
     this.timerId = null;
   }
