@@ -428,6 +428,9 @@ class PNConnection extends Connection {
       .then(()=>{
         this.logger.info("lock-expired event is fired. We remount all.");
         return this._onInitialConnClosed()
+      }).catch((e) => {
+        this.logger.info("Failed to handle lock expired event", e)
+        //IGNORE
       })
   }
 
