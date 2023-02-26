@@ -267,5 +267,18 @@ class Connection extends AbstractConnection{
   removeDisconnectEventListener(id) {
     return this.wsConn.removeDisconnectEventListener(id)
   }
+
+  isTokenExpire() {
+    if (this.token == null) {
+      return false
+    }
+    const token = JSON.parse(Buffer.from(this.token.split(".")[1], "base64").toString());
+    const limit = token.exp
+    const now = Math.round(new Date().getTime() / 1000)
+    if (now < limit) {
+      return false
+    }
+    return true
+  }
 }
 export default Connection;
