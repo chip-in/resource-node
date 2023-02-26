@@ -268,7 +268,7 @@ class Connection extends AbstractConnection{
     return this.wsConn.removeDisconnectEventListener(id)
   }
 
-  isTokenExpire() {
+  isTokenExpired() {
     if (this.token == null) {
       return false
     }
