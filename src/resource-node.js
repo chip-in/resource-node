@@ -854,17 +854,10 @@ rnode.start()
    * JWT トークンが設定されており、かつ有効期限を超過している場合に true を返します。
    */
   isTokenExpired() {
-    const jwt = this._resolveToken()
-    if (jwt == null) {
-      return false
+    if (this.conn) {
+      return this.conn.isTokenExpired();
     }
-    const token = JSON.parse(Buffer.from(jwt.split(".")[1], "base64").toString());
-    const limit = token.exp
-    const now = Math.round(new Date().getTime() / 1000)
-    if (now < limit) {
-      return false
-    }
-    return true
+    return true;
   }
 }
 
