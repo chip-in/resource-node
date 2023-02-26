@@ -1,6 +1,6 @@
 import Logger from '../../util/logger';
-import AsyncLock from 'async-lock'
 import uuidv4 from 'uuid/v4';
+import { createLock } from '../../util/lock'
 
 const IGNORE_CORENODE_CLUSTERING_ERROR = process.env.IGNORE_CORENODE_CLUSTERING_ERROR || "false";
 const ACQUIRE_LOCK_RETRY_INTERVAL = 10 * 1000;
@@ -35,7 +35,7 @@ class Cluster {
      * stopped,started,suspended
      */
     this.status = "stopped";
-    this.lock = new AsyncLock();
+    this.lock = createLock();
     this.lockKey = "instance-level-cluster-lock";
 
     this.initializeTimer = null

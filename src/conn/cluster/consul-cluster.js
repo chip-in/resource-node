@@ -2,9 +2,9 @@ import Cluster from './cluter';
 import Logger from '../../util/logger';
 import {resolve} from 'url';
 import AbortController from 'abort-controller';
-import AsyncLock from 'async-lock'
 import Connection from '../connection';
 import objectHash from 'object-hash';
+import { createLock } from '../../util/lock'
 
 const API_PATH_TO_RESOLVE_MEMBERS = "/v1/catalog/service/hmr";
 const API_PATH_TO_RESOLVE_NODE_KEY = "/v1/agent/self";
@@ -101,7 +101,7 @@ class BlockingQueryInvoker {
     this.path = path;
     this.cblist = [];
     this.logger = new Logger(this.constructor.name);
-    this.lock = new AsyncLock();
+    this.lock = createLock();
     this.lockKey = path;
     this.timerId = null;
   }
@@ -289,7 +289,22 @@ class ConsulCluster extends Cluster{
         this.logger.warn("Request is aborted. Finished to watch member.");
         return
       }
-      this._checkDifference(this._parseMembers(body))
+      const parsedMembers = this._parseMembers(body)
+      const applyChanges = (members) => {
+        return this._checkDifference(members)
+        .catch((e) => {
+          this.logger.error(`Failed to apply member's modification.`, e)
+          //RETRY
+          return new Promise((resolve, reject) => {
+            setTimeout(() => {
+              applyChanges(members)
+              .then(resolve)
+              .catch(reject)
+            }, RECONNECT_RETRY_INTERVAL)
+          })
+        })
+      }
+      applyChanges(parsedMembers)
         .then(()=>this._watchMembers())
     })
   }
@@ -558,7 +573,8 @@ class ConsulCluster extends Cluster{
           return Promise.resolve(this.onLockExpired())
         })
     }
-    this._setRenewTimer()
+    return Promise.resolve()
+    .then(() => this._setRenewTimer())
   }
 
   _setRenewTimer() {
@@ -581,18 +597,16 @@ class ConsulCluster extends Cluster{
       .then((body)=>{
         if (body == null || body[0] == null) {
           this.logger.error("Failed to renew session. Body is empty.")
-          this._handleRenewError();
-          return;
+          return this._handleRenewError();
         }
         this.logger.debug("Succeeded to renew session. SessionId:" + this.sessionId );
         this.renewErrorCount = 0;
         //next
-        this._setRenewTimer()
+        return this._setRenewTimer()
       })
       .catch((e)=>{
         this.logger.error(`Failed to renew session. Error detected: message='${e.message}', name=${e.name}`);
-        this._handleRenewError();
-        return;
+        return this._handleRenewError();
       })
     })
   }
@@ -695,8 +709,9 @@ class ConsulCluster extends Cluster{
           .then((isSessionAlive)=> {
             if (isSessionAlive) {
               this.logger.info(`Resume cluster: Set renew timer`);
-              this._setRenewTimer()
-              this._watchMembers()
+              return this._setRenewTimer()
+              .then(() => this._watchMembers())
+              
             } else {
               return this._createSession()
               .then(()=> {

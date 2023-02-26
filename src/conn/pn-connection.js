@@ -1,11 +1,11 @@
 import Connection from './connection';
 import constants from '../util/constants';
 import uuidv4 from 'uuid/v4';
-import AsyncLock from 'async-lock'
 import Logger from '../util/logger';
 import ConsulCluster from './cluster/consul-cluster';
+import { createLock } from '../util/lock'
 
-const connConversionLock = new AsyncLock()
+const connConversionLock = createLock()
 
 var promoteMap = {};
 var staticLogger = new Logger("PNConnectionCommon");
@@ -428,6 +428,9 @@ class PNConnection extends Connection {
       .then(()=>{
         this.logger.info("lock-expired event is fired. We remount all.");
         return this._onInitialConnClosed()
+      }).catch((e) => {
+        this.logger.info("Failed to handle lock expired event", e)
+        //IGNORE
       })
   }
 

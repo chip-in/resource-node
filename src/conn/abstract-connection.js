@@ -1,6 +1,6 @@
 import Logger from '../util/logger';
-import AsyncLock from 'async-lock'
 import uuidv4 from 'uuid/v4';
+import { createLock } from '../util/lock'
 
 const SEMAPHORE_KEY_NAME = "instance-level-connection-lock";
 const SUSPEND_ERROR_MESSAGE = "Connection temporarily disabled"
@@ -43,7 +43,7 @@ class AbstractConnection {
     this.token = token;
     this.isConnecting = false;
     this.waiters = [];
-    this.lock = new AsyncLock();
+    this.lock = createLock();
 
     this.connectEventListeners = {}
     this.disconnectEventListeners = {}
