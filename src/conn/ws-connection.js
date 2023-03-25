@@ -460,7 +460,6 @@ class WSConnection extends AbstractConnection {
             this.logger.warn("Response is empty");
             resp.status(500).end();
             return this._answerResponse(msg, resp);
-            return;
           }
           return this._answerResponse(msg, resp2);
         }).then(() => {
