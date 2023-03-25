@@ -208,7 +208,12 @@ class WSConnection extends AbstractConnection {
           s.on('disconnect', (r)=>onDisconnect(r));
           s.on('connect_error', (e)=>onDisconnect(e ? e.message : "connect_error"))
           s.on(webSocketMsgName, (msg) =>{
-            this._receive(msg);
+            this._receive(msg).then(() => {
+              this.logger.debug("Succeeded to process received websocket message")
+            }).catch((e)=>{
+              this.logger.error("Failed to process received websocket message", e);
+            });
+    
           });
           // Manager events
           // https://socket.io/docs/v3/migrating-from-2-x-to-3-0/#the-socket-instance-will-no-longer-forward-the-events-emitted-by-its-manager
@@ -378,6 +383,7 @@ class WSConnection extends AbstractConnection {
       }
       Promise.resolve()
         .then(()=>this.send(Object.assign({a : true}, msg)))
+        .catch((e)=>reject(e))
     });
     
   }
@@ -441,28 +447,25 @@ class WSConnection extends AbstractConnection {
         if (!proxy) {
           this.logger.warn("proxy instance not found");
           resp.status(404).end();
-          this._answerResponse(msg, resp);
-          resolve();
+          this._answerResponse(msg, resp).then(()=>resolve()).catch((e)=>reject(e));
           return;
         }
         var promise = proxy.onReceive(req, resp);
         if (promise == null) {
-          this._answerResponse(msg, resp);
-          resolve();
+          this._answerResponse(msg, resp).then(()=>resolve()).catch((e)=>reject(e));
           return;
         }
         promise.then((resp2)=>{
           if (!resp2) {
             this.logger.warn("Response is empty");
             resp.status(500).end();
-            this._answerResponse(msg, resp);
-            resolve();
+            return this._answerResponse(msg, resp);
             return;
           }
-          this._answerResponse(msg, resp2);
+          return this._answerResponse(msg, resp2);
+        }).then(() => {
           resolve();
         }).catch((e)=>{
-          this.logger.error("Failed to proxy service", e);
           reject(e);
         });
       })
@@ -478,7 +481,7 @@ class WSConnection extends AbstractConnection {
                         resp.body &&
                         resp.body.length != null &&
                         resp.body.length < webSocketSkipCompressMaxSize)
-    this.send(Object.assign({}, msg, {
+    return this.send(Object.assign({}, msg, {
       m : copyResp,
       t : "response",
       o : Object.assign({}, msg.o, {
