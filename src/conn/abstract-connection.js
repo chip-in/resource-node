@@ -79,8 +79,12 @@ class AbstractConnection {
         let shutdownMonitor = setInterval(()=> {
           if (this.stopOpenProcess) {
             this.logger.warn("stopOpenProcess is true")
-            this._close()
-            clearMonitor()
+            this._close().then(() => {
+              clearMonitor()
+            }).catch((e)=>{
+              this.logger.warn("failed to close on shutdown", e)
+              clearMonitor()
+            })
           }
         }, 1000)
         const clearMonitor = () => {
