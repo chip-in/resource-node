@@ -6,7 +6,7 @@ import uuidv4 from 'uuid/v4';
 
 const port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
 const mqttPath = process.env.CNODE_MQTT_PATH || "/m";
-const SUBSCRIBE_QOS = 1
+const SUBSCRIBE_QOS = { qos: 1 };
 
 class MQTTConnection extends AbstractConnection {
 
@@ -139,13 +139,21 @@ class MQTTConnection extends AbstractConnection {
           subscriber, key, topicName, 
           matcher : this._createMatcher(topicName),
         })
-        var topicObj = {resubscribe:true};
+        var topicObj = {};
         topicObj[topicName] = SUBSCRIBE_QOS
         this.mqttclient.subscribe(topicObj, {}, (e, g)=>{
-          this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          if (e) {
+            this.logger.error("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          } else {
+            this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          }
           if (!responded) {
             responded = true;
-            res(key);
+            if (e) {
+              rej(e);
+            } else {
+              res(key);
+            }
           }
         })
       })
@@ -155,7 +163,7 @@ class MQTTConnection extends AbstractConnection {
   _unsubscribe(targets, ignoreError) {
     return targets.reduce((p, entry)=>{
       return p.then(()=>new Promise((res, rej)=>{
-        this.mqttclient.unsubscribe(entry.topicName, (e)=>{
+        this.mqttclient.unsubscribe(entry.topicName, {}, (e)=>{
           if (e) {
             this.logger.warn("Failed to unsubscribe topic:(%s : %s)", entry.topicName, entry.key, e);
             if (ignoreError) {
