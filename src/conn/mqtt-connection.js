@@ -6,7 +6,7 @@ import uuidv4 from 'uuid/v4';
 
 const port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
 const mqttPath = process.env.CNODE_MQTT_PATH || "/m";
-const SUBSCRIBE_QOS = { qos: 1 };
+const SUBSCRIBE_QOS = 1;
 
 class MQTTConnection extends AbstractConnection {
 
@@ -140,7 +140,7 @@ class MQTTConnection extends AbstractConnection {
           matcher : this._createMatcher(topicName),
         })
         var topicObj = {};
-        topicObj[topicName] = SUBSCRIBE_QOS
+        topicObj[topicName] = { qos: SUBSCRIBE_QOS };
         this.mqttclient.subscribe(topicObj, {}, (e, g)=>{
           if (e) {
             this.logger.error("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
