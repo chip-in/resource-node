@@ -15,6 +15,11 @@ class MQTTConnection extends AbstractConnection {
     this.mqttclient = null;
     this.subscribers = [];
     this.waiters = []
+    this.startLock = null;
+  }
+
+  injectStartLock(lock) {
+    this.startLock = lock;
   }
 
   _open() {
@@ -78,14 +83,29 @@ class MQTTConnection extends AbstractConnection {
           }
         }
         this.mqttclient.on("message", (topic, message, packet)=>{
-          const isRetain = packet.retain;
-          this.subscribers.map((entry)=>{
-            if (entry.matcher.match(topic).length > 0 &&
+          if (this.startLock) {
+            this.startLock.readLock()
+              .then(() => {
+                const isRetain = packet.retain;
+                this.subscribers.map((entry)=>{
+                  if (entry.matcher.match(topic).length > 0 &&
+                    (!isRetain || !entry.retainReceived)) {
+                    entry.subscriber.onReceive(message);
+                    entry.retainReceived = true;
+                  }
+                })
+                this.startLock.unlock();
+              });
+          } else {
+            const isRetain = packet.retain;
+            this.subscribers.map((entry)=>{
+              if (entry.matcher.match(topic).length > 0 &&
                 (!isRetain || !entry.retainReceived)) {
-              entry.subscriber.onReceive(message);
-              entry.retainReceived = true;
-            }
-          })
+                entry.subscriber.onReceive(message);
+                entry.retainReceived = true;
+              }
+            })
+          }
         })
         this.mqttclient.on("close", onClose)
         this.mqttclient.on("disconnect", onClose)

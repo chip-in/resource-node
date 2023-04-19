@@ -9,6 +9,7 @@ import ConfigLoader from './util/config-loader';
 import cookie from 'cookie';
 import Connection from './conn/connection';
 import PNConnectom from './conn/pn-connection';
+import { RWLock } from 'async-rwlock';
 
 const COOKIE_NAME_TOKEN = "access_token";
 
@@ -89,6 +90,8 @@ class ResourceNode {
     this.listenerMap = {};
 
     this.pendingRequest = []
+
+    this.startLock = new RWLock();
   }
 
   _resumeRequests(stat) {
@@ -140,6 +143,7 @@ node.start()
       "onDisconnect" : ()=>this._onDisconnect(),
       "onTokenUpdate" : (token)=>this._onTokenUpdate(token)
     });
+    this.conn.injectStartLock(this.startLock);
     this.status = RN_STATUS_STARTING
     return Promise.resolve()
       .then(()=>this.conn.open())
@@ -685,10 +689,20 @@ rnode.start()
   }
 
   _enableServices() {
-    return Promise.resolve()
+    return this.startLock.writeLock()
       .then(()=>this._searchNodeClass(this.nodeClassName))
       .then((conf)=>this._createServiceClassInstance(conf))
-      .then(()=>this._startServiceClasses());
+      .then(()=>this._startServiceClasses())
+      .catch((e)=>{
+        this.startLock.unlock();
+        throw e;
+      })
+      .then(()=>{
+        setTimeout(()=>{
+          this.logger.info("All services have completed startup.");
+          this.startLock.unlock();
+        }, 1000);
+      });
   }
 
   _searchNodeClass(nodeClassName) {
