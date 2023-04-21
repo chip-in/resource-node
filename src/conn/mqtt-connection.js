@@ -82,27 +82,21 @@ class MQTTConnection extends AbstractConnection {
             this.logger.warn(`mqtt connection closed`);
           }
         }
-        this.mqttclient.on("message", (topic, message, packet)=>{
+        this.mqttclient.on("message", (topic, message)=>{
           if (this.startLock) {
             this.startLock.readLock()
               .then(() => {
-                const isRetain = packet.retain;
                 this.subscribers.map((entry)=>{
-                  if (entry.matcher.match(topic).length > 0 &&
-                    (!isRetain || !entry.retainReceived)) {
+                  if (entry.matcher.match(topic).length > 0) {
                     entry.subscriber.onReceive(message);
-                    entry.retainReceived = true;
                   }
                 })
                 this.startLock.unlock();
               });
           } else {
-            const isRetain = packet.retain;
             this.subscribers.map((entry)=>{
-              if (entry.matcher.match(topic).length > 0 &&
-                (!isRetain || !entry.retainReceived)) {
+              if (entry.matcher.match(topic).length > 0) {
                 entry.subscriber.onReceive(message);
-                entry.retainReceived = true;
               }
             })
           }
