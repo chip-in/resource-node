@@ -82,21 +82,28 @@ class MQTTConnection extends AbstractConnection {
             this.logger.warn(`mqtt connection closed`);
           }
         }
-        this.mqttclient.on("message", (topic, message)=>{
+        this.mqttclient.on("message", (topic, message, packet)=>{
+          this.logger.info("Message received(%s)", topic)
           if (this.startLock) {
             this.startLock.readLock()
               .then(() => {
+                const isRetain = packet.retain;
                 this.subscribers.map((entry)=>{
-                  if (entry.matcher.match(topic).length > 0) {
+                  if (entry.matcher.match(topic).length > 0 &&
+                    (!isRetain || !entry.retainReceived)) {
                     entry.subscriber.onReceive(message);
+                    entry.retainReceived = true;
                   }
                 })
                 this.startLock.unlock();
               });
           } else {
+            const isRetain = packet.retain;
             this.subscribers.map((entry)=>{
-              if (entry.matcher.match(topic).length > 0) {
+              if (entry.matcher.match(topic).length > 0 &&
+                (!isRetain || !entry.retainReceived)) {
                 entry.subscriber.onReceive(message);
+                entry.retainReceived = true;
               }
             })
           }
@@ -236,7 +243,8 @@ class MQTTConnection extends AbstractConnection {
       wsOptions : {
         headers : this.createAuthorizationHeaders(this.userId, this.password, this.token)
       },
-      clientId: "rn_" + uuidv4()
+      clientId: "rn_" + uuidv4(),
+      clean: false
     };
 
     if (this.token == null) {
