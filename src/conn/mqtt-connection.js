@@ -16,6 +16,7 @@ class MQTTConnection extends AbstractConnection {
     this.subscribers = [];
     this.waiters = []
     this.startLock = null;
+    this.retainBuffer = {};
   }
 
   injectStartLock(lock) {
@@ -95,6 +96,7 @@ class MQTTConnection extends AbstractConnection {
                     entry.retainReceived = true;
                   }
                 })
+                this.retainBuffer[topic] = message;
                 this.startLock.unlock();
               });
           } else {
@@ -106,6 +108,7 @@ class MQTTConnection extends AbstractConnection {
                 entry.retainReceived = true;
               }
             })
+            this.retainBuffer[topic] = message;
           }
         })
         this.mqttclient.on("close", onClose)
@@ -156,9 +159,19 @@ class MQTTConnection extends AbstractConnection {
       var responded = false;
       return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
         this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
+        var matcher = this._createMatcher(topicName);
+        var retainReceived = false;
+        for (var topic in this.retainBuffer) {
+          if (matcher.match(topic).length > 0) {
+            subscriber.onReceive(this.retainBuffer[topic]);
+            this.logger.info("Message received from retainBuffer(%s)", topicName)
+            retainReceived = true;
+            break;
+          }
+        }
         this.subscribers.push({
           subscriber, key, topicName, 
-          matcher : this._createMatcher(topicName),
+          matcher, retainReceived,
         })
         var topicObj = {};
         topicObj[topicName] = { qos: SUBSCRIBE_QOS };
