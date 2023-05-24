@@ -31,6 +31,10 @@ class Connection extends AbstractConnection{
     return this.initArgs;
   }
 
+  injectStartLock(lock) {
+    this.mqttConn.injectStartLock(lock);
+  }
+
   _open() {
     return Promise.resolve()
       .then(()=>this.raiseSuspended())

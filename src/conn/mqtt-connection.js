@@ -6,7 +6,7 @@ import uuidv4 from 'uuid/v4';
 
 const port = process.env.CNODE_MQTT_PORT ? (":" + process.env.CNODE_MQTT_PORT) : '';
 const mqttPath = process.env.CNODE_MQTT_PATH || "/m";
-const SUBSCRIBE_QOS = 1
+const SUBSCRIBE_QOS = 1;
 
 class MQTTConnection extends AbstractConnection {
 
@@ -15,6 +15,12 @@ class MQTTConnection extends AbstractConnection {
     this.mqttclient = null;
     this.subscribers = [];
     this.waiters = []
+    this.startLock = null;
+    this.retainBuffer = {};
+  }
+
+  injectStartLock(lock) {
+    this.startLock = lock;
   }
 
   _open() {
@@ -78,14 +84,32 @@ class MQTTConnection extends AbstractConnection {
           }
         }
         this.mqttclient.on("message", (topic, message, packet)=>{
-          const isRetain = packet.retain;
-          this.subscribers.map((entry)=>{
-            if (entry.matcher.match(topic).length > 0 &&
+          this.logger.info("Message received(%s)", topic)
+          if (this.startLock) {
+            this.startLock.readLock()
+              .then(() => {
+                const isRetain = packet.retain;
+                this.subscribers.map((entry)=>{
+                  if (entry.matcher.match(topic).length > 0 &&
+                    (!isRetain || !entry.retainReceived)) {
+                    entry.subscriber.onReceive(message);
+                    entry.retainReceived = true;
+                  }
+                })
+                this.retainBuffer[topic] = message;
+                this.startLock.unlock();
+              });
+          } else {
+            const isRetain = packet.retain;
+            this.subscribers.map((entry)=>{
+              if (entry.matcher.match(topic).length > 0 &&
                 (!isRetain || !entry.retainReceived)) {
-              entry.subscriber.onReceive(message);
-              entry.retainReceived = true;
-            }
-          })
+                entry.subscriber.onReceive(message);
+                entry.retainReceived = true;
+              }
+            })
+            this.retainBuffer[topic] = message;
+          }
         })
         this.mqttclient.on("close", onClose)
         this.mqttclient.on("disconnect", onClose)
@@ -135,17 +159,35 @@ class MQTTConnection extends AbstractConnection {
       var responded = false;
       return new Promise((res, rej)=>{/*eslint-disable-line no-unused-vars*/
         this.logger.info("bind mqtt topic and key(%s : %s)", topicName, key);
+        var matcher = this._createMatcher(topicName);
+        var retainReceived = false;
+        for (var topic in this.retainBuffer) {
+          if (matcher.match(topic).length > 0) {
+            subscriber.onReceive(this.retainBuffer[topic]);
+            this.logger.info("Message received from retainBuffer(%s)", topicName)
+            retainReceived = true;
+            break;
+          }
+        }
         this.subscribers.push({
           subscriber, key, topicName, 
-          matcher : this._createMatcher(topicName),
+          matcher, retainReceived,
         })
-        var topicObj = {resubscribe:true};
-        topicObj[topicName] = SUBSCRIBE_QOS
+        var topicObj = {};
+        topicObj[topicName] = { qos: SUBSCRIBE_QOS };
         this.mqttclient.subscribe(topicObj, {}, (e, g)=>{
-          this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          if (e) {
+            this.logger.error("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          } else {
+            this.logger.info("subcribe topic(%s):error=%s:granted=%s", topicName, e, JSON.stringify(g))
+          }
           if (!responded) {
             responded = true;
-            res(key);
+            if (e) {
+              rej(e);
+            } else {
+              res(key);
+            }
           }
         })
       })
@@ -155,7 +197,7 @@ class MQTTConnection extends AbstractConnection {
   _unsubscribe(targets, ignoreError) {
     return targets.reduce((p, entry)=>{
       return p.then(()=>new Promise((res, rej)=>{
-        this.mqttclient.unsubscribe(entry.topicName, (e)=>{
+        this.mqttclient.unsubscribe(entry.topicName, {}, (e)=>{
           if (e) {
             this.logger.warn("Failed to unsubscribe topic:(%s : %s)", entry.topicName, entry.key, e);
             if (ignoreError) {
@@ -213,7 +255,9 @@ class MQTTConnection extends AbstractConnection {
       keepalive: 30,
       wsOptions : {
         headers : this.createAuthorizationHeaders(this.userId, this.password, this.token)
-      }
+      },
+      clientId: "rn_" + uuidv4(),
+      clean: false
     };
 
     if (this.token == null) {
