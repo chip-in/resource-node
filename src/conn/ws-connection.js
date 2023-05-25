@@ -194,8 +194,8 @@ class WSConnection extends AbstractConnection {
               }
             })
           }
-          const onDisconnect = (reason, description) => {
-            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}:${description?description:'no description'}`);
+          const onDisconnect = (reason) => {
+            this.logger.warn(`disconnected to core-node via websocket. Reason:${reason}`);
             let currentStatus = this.socketioStatus
             setStatusToDisconnect(reason)
             if (currentStatus === "connect") {
@@ -205,7 +205,7 @@ class WSConnection extends AbstractConnection {
               this.logger.info(`Current socketioStatus = ${currentStatus}, we skip disconnect handler`);
             }
           }
-          s.on('disconnect', (r)=>onDisconnect(r));
+          s.on('disconnect', (r, d)=>onDisconnect(`${r}:from disconnect event:${d?JSON.stringify(d):"no description"}`))
           s.on('connect_error', (e)=>onDisconnect(e ? e.message : "connect_error"))
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg).then(() => {
