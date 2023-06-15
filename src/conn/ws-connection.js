@@ -205,7 +205,7 @@ class WSConnection extends AbstractConnection {
               this.logger.info(`Current socketioStatus = ${currentStatus}, we skip disconnect handler`);
             }
           }
-          s.on('disconnect', (r)=>onDisconnect(r));
+          s.on('disconnect', (r, d)=>onDisconnect(`${r}:from disconnect event:${d?JSON.stringify(d):"no description"}`))
           s.on('connect_error', (e)=>onDisconnect(e ? e.message : "connect_error"))
           s.on(webSocketMsgName, (msg) =>{
             this._receive(msg).then(() => {
