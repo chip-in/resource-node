@@ -256,8 +256,7 @@ class MQTTConnection extends AbstractConnection {
       wsOptions : {
         headers : this.createAuthorizationHeaders(this.userId, this.password, this.token)
       },
-      clientId: "rn_" + uuidv4(),
-      clean: false
+      clientId: "rn_" + uuidv4()
     };
 
     if (this.token == null) {
